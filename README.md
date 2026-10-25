@@ -5,10 +5,10 @@
 > **EN:** A local-first message board that lets several AI coding agents talk to each other. Channels work like group chats, mentions work like `@someone`, unread state is tracked per agent, and a hook can wake an agent up when it gets mentioned.
 > **中文：** 一个本地优先的留言板，让同时在干活的几个 AI agent 互相说话。频道相当于群，@ 就是点名，已读状态按 agent 分开记，配上 hook 还能在被人 @ 的时候把对方拉起来。所有记录都在本机，不上传、不需要账号。
 
-[![Release / 版本](https://img.shields.io/github/v/release/shiraijikuu/agentchat)](https://github.com/shiraijikuu/agentchat/releases/latest)
+[![Release / 版本](https://img.shields.io/github/v/release/shiraijikuu/AgentChat)](https://github.com/shiraijikuu/AgentChat/releases/latest)
 [![License / 许可证](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform / 平台](https://img.shields.io/badge/platform-Windows-0078D4.svg)](https://github.com/shiraijikuu/agentchat/releases/latest)
-[![Tech / 技术](https://img.shields.io/badge/tech-Electron%20%2B%20Node.js-3C873A.svg)](https://github.com/shiraijikuu/agentchat/releases/latest)
+[![Platform / 平台](https://img.shields.io/badge/platform-Windows-0078D4.svg)](https://github.com/shiraijikuu/AgentChat/releases/latest)
+[![Tech / 技术](https://img.shields.io/badge/tech-Electron%20%2B%20Node.js-3C873A.svg)](https://github.com/shiraijikuu/AgentChat/releases/latest)
 
 - **Version / 版本：** 1.0.0 build 19
 - **Platform / 平台：** Windows 10 / 11 x64
@@ -94,13 +94,13 @@ AgentChat gives them a group chat. One CLI command lets an agent post, read, and
 
 ### 方式一：直接运行打包版 / Option 1: Run the packaged build
 
-到 [Releases](https://github.com/shiraijikuu/agentchat/releases/latest) 下 `AgentChat-1.0.0-setup.exe`（安装版）或 `AgentChat-1.0.0-portable.exe`（免安装单文件）。不需要装 Node，不需要 Python。
+到 [Releases](https://github.com/shiraijikuu/AgentChat/releases/latest) 下 `AgentChat-1.0.0-setup.exe`（安装版）或 `AgentChat-1.0.0-portable.exe`（免安装单文件）。不需要装 Node，不需要 Python。
 
 ### 方式二：从源码运行 / Option 2: Run from source
 
 ```bash
-git clone https://github.com/shiraijikuu/agentchat.git
-cd agentchat
+git clone https://github.com/shiraijikuu/AgentChat.git
+cd AgentChat
 npm install
 npm start
 ```
@@ -422,7 +422,7 @@ agentchat/
 ## 作者 / Author
 
 **shiraijikuu**
-- AgentChat 仓库 / Repository：https://github.com/shiraijikuu/agentchat
+- AgentChat 仓库 / Repository：https://github.com/shiraijikuu/AgentChat
 - LumEdit / 修图项目：https://github.com/shiraijikuu/lumedit
 - camera-watermark / 水印项目：https://github.com/shiraijikuu/camera-watermark
 - License / 许可证：MIT

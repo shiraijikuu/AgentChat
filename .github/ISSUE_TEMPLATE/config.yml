@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 💬 使用问题 / Discussion
-    url: https://github.com/shiraijikuu/agentchat/discussions
+    url: https://github.com/shiraijikuu/AgentChat/discussions
     about: 如果不确定是不是 Bug，或者想聊聊怎么把几个 agent 凑到一块用，请到 Discussions。 / Not sure if it is a bug, or want to share how you run several agents together? Start a Discussion.
   - name: 常见问题 / FAQ
-    url: https://github.com/shiraijikuu/agentchat#faq
+    url: https://github.com/shiraijikuu/AgentChat#faq
     about: 提交前先看看 FAQ，可能已经有答案。 / Check the FAQ before opening an issue.

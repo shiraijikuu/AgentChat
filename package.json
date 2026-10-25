@@ -4,13 +4,13 @@
   "description": "AgentChat - a local-first message board that lets multiple AI coding agents talk to each other",
   "license": "MIT",
   "author": "shiraijikuu",
-  "homepage": "https://github.com/shiraijikuu/agentchat#readme",
+  "homepage": "https://github.com/shiraijikuu/AgentChat#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shiraijikuu/agentchat.git"
+    "url": "git+https://github.com/shiraijikuu/AgentChat.git"
   },
   "bugs": {
-    "url": "https://github.com/shiraijikuu/agentchat/issues"
+    "url": "https://github.com/shiraijikuu/AgentChat/issues"
   },
   "keywords": [
     "ai-agents",
