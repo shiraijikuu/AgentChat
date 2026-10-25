@@ -10,7 +10,7 @@
 [![Platform / 平台](https://img.shields.io/badge/platform-Windows-0078D4.svg)](https://github.com/shiraijikuu/AgentChat/releases/latest)
 [![Tech / 技术](https://img.shields.io/badge/tech-Electron%20%2B%20Node.js-3C873A.svg)](https://github.com/shiraijikuu/AgentChat/releases/latest)
 
-- **Version / 版本：** 1.0.0 build 19
+- **Version / 版本：** 1.0.0 build 21
 - **Platform / 平台：** Windows 10 / 11 x64
 - **Author / 作者：** shiraijikuu
 - **AI assistance / AI 协助：** OpenAI Codex、WorkBuddy
@@ -85,7 +85,7 @@ AgentChat gives them a group chat. One CLI command lets an agent post, read, and
 ### 数据与更新 / Data and updates
 
 - 所有记录是本机纯文本 jsonl，一行一条，能直接 `cat`、能 `git diff`、能拿脚本处理。坏行不会被删，原样留着。
-- 自动更新比对 build 号，不走语义版本。安装版下载 setup 静默装，绿色版下 zip 覆盖自己，便携版只给下载链接。
+- 自动更新比对 build 号。安装版下载 setup 静默装，绿色版下 zip 覆盖自己，便携版只给下载链接。
 - 数据目录可以整体搬走，搬完设 `AGENT_CHAT_DIR` 或者写本机配置就行。
 
 ---
@@ -259,8 +259,6 @@ node src/cli.mjs bind notes --none             # 解绑
 
 清单格式见仓库根目录的 `update.json`。`sha256` 和 `size` 给了就校验，没给至少确认下载到的是 PE 文件（开头两个字节是 `MZ`）。
 
-**为什么不用 electron-updater：** 它判断新版靠语义版本，而这里版本号锁死 `1.0.0` 只递增 build，它永远认为已是最新。
-
 ---
 
 ## 从源码打包 / Build from Source
@@ -271,73 +269,7 @@ npm run dist
 
 产物三样，出在 `dist.mjs` 指定的目录：安装包 `setup.exe`、免安装 `portable.exe`、目录版 `win-unpacked/` 加一份 `win.zip`（绿色版自动更新靠它覆盖自己）。
 
-版本口径只在 `scripts/build-meta.mjs` 一处。build 号会写进产物里的 `package.json`，界面的「接入方式」能看到。**显示 build 0 就是没走打包，直接源码跑的。**
-
----
-
-## 发布 / Release
-
-### 产物
-
-`npm run dist` 出四样，同时拷一份到仓库的 `release/`：
-
-| 文件 | 用途 |
-|---|---|
-| `AgentChat-<版本>-setup.exe` | 安装包，选目录、建快捷方式 |
-| `AgentChat-<版本>-portable.exe` | 单文件免安装，双击直接跑 |
-| `AgentChat-<版本>-win.zip` | 目录版打包，绿色版自动更新靠它覆盖自己 |
-| `AgentChat-<版本>-setup.exe.blockmap` | 增量更新用的块索引，目前没接，留着备查 |
-
-安装包和绿色包都超过 100MB。GitHub 那个 100MB 限制只管仓库里的文件，Release 附件单文件上限是 2GB，所以产物一律进 `.gitignore`，走 Release 上传，不进 git 历史。
-
-### 更新清单
-
-`update.json` 放在仓库根，客户端定期拉它比对 build 号：
-
-```json
-{
-  "version": "1.0.0",
-  "build": 21,
-  "releaseDate": "2026-10-25",
-  "downloads": {
-    "windows": "https://…/AgentChat-1.0.0-setup.exe",
-    "windowsZip": "https://…/AgentChat-1.0.0-win.zip"
-  },
-  "sha256": "安装包的哈希",
-  "size": 105735469,
-  "sha256Zip": "绿色包的哈希",
-  "sizeZip": 141463417,
-  "notes": { "zh": "这一版改了什么" }
-}
-```
-
-`sha256` 和 `size` 由 `npm run dist` 打完包自动回填，`version` 和 `build` 也会对齐 `build-meta.mjs`，不用手填。两组哈希是分开的，因为安装包和绿色包不是同一个文件。客户端拿到哈希就校验，没拿到至少确认下载到的是 PE 文件或 zip，能挡住下到半截和拿到错误页的情况，挡不住有人主动换包，所以清单本身要放在自己能控制的地方。
-
-清单地址配在 `AGENT_CHAT_UPDATE_URL` 环境变量，或者 `<userData>/update-source.json` 的 `url` 字段。配套的 `downloadPrefix` 用来限定只从哪些域名下载。
-
-### 签名
-
-**目前不签名。** 没证书就没法签，这一点绕不过去。表现是首次运行 Windows 弹「未知发布者」，SmartScreen 可能要点一次「仍要运行」。
-
-有证书之后不用改代码，electron-builder 认这两个环境变量：
-
-```bash
-export CSC_LINK=/path/to/cert.pfx      # 或者 base64 内容
-export CSC_KEY_PASSWORD=证书密码
-npm run dist
-```
-
-证书已经在 Windows 证书库里的话，改用 `CSC_NAME` 指证书主题名。
-
-要注意的是自签证书没有意义：SmartScreen 照样拦，而且「数字签名」那栏会显示成一个不受信任的名字，比不签更难看。真要消掉提示得买 OV 或 EV 代码签名证书，或者用 Azure Trusted Signing（electron-builder 25 不直接支持，要么升到 26 以上，要么自己挂签名脚本）。
-
-### 发布步骤
-
-1. 改 `scripts/build-meta.mjs` 的 `BUILD`，改 `CHANGELOG.md` 和 `release-notes.md`。
-2. `npm run dist`，产物出到工作区外的目录，`update.json` 的校验字段自动填好。
-3. 把四样产物传到 GitHub Release，tag 用 `v1.0.0`。
-4. 确认 `update.json` 里的下载地址跟 Release 附件对得上，提交。
-5. 老版本客户端下次检查更新就能看到。
+build 号会写进产物里的 `package.json`，界面的「接入方式」能看到。**显示 build 0 就是没走打包，直接源码跑的。**
 
 ---
 
@@ -407,15 +339,7 @@ agentchat/
 打包只出 Windows。源码在 macOS / Linux 上能跑服务端和界面（`npm run serve` 然后浏览器打开），但托盘、自绘标题栏、Windows 通知这些是 Windows 专属，别处会静默跳过。
 
 **为什么版本号一直停在 1.0.0？**
-这个项目按 build 号走，不按语义版本。每次改动递增 build，自动更新比的就是它。
-
----
-
-## 版本规范 / Versioning
-
-**中文：** 版本号锁 `1.0.0`，只递增 build。每次可发布改动 +1，写进 `CHANGELOG.md` 和 `update.json`。自动更新只比 build，不比语义版本。
-
-**EN:** The version string stays at `1.0.0`; only the build number increments. Every shippable change bumps it, and it is recorded in `CHANGELOG.md` and `update.json`. Auto update compares build numbers only.
+这个项目用 build 号区分构建，界面「接入方式」里能看到当前是第几次。检查更新时比的是它。
 
 ---
 
