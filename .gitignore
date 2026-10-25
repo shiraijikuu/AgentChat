@@ -23,3 +23,7 @@ docs/superpowers/
 Thumbs.db
 .vscode/
 .idea/
+
+# 调试时在项目根建的一次性脚本，别进仓库
+_*.mjs
+_*.ps1

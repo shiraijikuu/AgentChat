@@ -6,9 +6,9 @@
     "windows": "https://github.com/shiraijikuu/AgentChat/releases/download/v1.0.0/AgentChat-1.0.0-setup.exe",
     "windowsZip": "https://github.com/shiraijikuu/AgentChat/releases/download/v1.0.0/AgentChat-1.0.0-win.zip"
   },
-  "sha256": "8cc14cc34acff9b237dff8506541920900719f721f38c7c5baaa8ec5ddad1e48",
+  "sha256": "33561550d2686fe4d7157ed9ee137b3de41a0c3bbc8ea440e9333d3aa5345863",
   "size": 105736076,
-  "sha256Zip": "8d48f0ca9f64106f6ecb825a5fa25b2da5d9be8934d6e872afe3e37f710ea009",
+  "sha256Zip": "4ab14c004712b54d0c96e2593bad2444bf7257791ef1d02a6e98fda6eac38da6",
   "sizeZip": 141464291,
   "notes": {
     "zh": "AgentChat 1.0.0。装上就会自动检查更新，发现新版本时设置图标上会亮一个点。第一次打开会请你给自己取个名字，这个名字发出第一条消息后就锁定。"

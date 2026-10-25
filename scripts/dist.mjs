@@ -123,7 +123,8 @@ if (r.status !== 0) {
   process.exit(r.status ?? 1);
 }
 
-// 可发布的资产拷一份回仓库的 release/，方便直接拿包和留档。
+// 可发布的资产放仓库的 release/，出目录里只留 win-unpacked 供本机直接跑。
+// 两边各留一份会让人分不清哪份是准的，所以拷完就把源文件删掉。
 // 没有 latest.yml：那是 electron-updater 的清单，这条路不走（见 electron-builder.yml 的说明）。
 // 更新靠仓库根目录的 update.json，发版时按 scripts/build-meta.mjs 的版本和 build 改它。
 const relDir = path.join(root, 'release');
@@ -138,18 +139,30 @@ const assets = [
 const copied = [];
 for (const name of assets) {
   const src = path.join(outRoot, name);
-  if (fs.existsSync(src)) {
-    fs.copyFileSync(src, path.join(relDir, name));
-    copied.push(name);
+  if (!fs.existsSync(src)) continue;
+  const dest = path.join(relDir, name);
+  // 有人把出目录直接设成 release/ 的时候，别把自己刚写的东西删了
+  if (path.resolve(src) !== path.resolve(dest)) {
+    fs.copyFileSync(src, dest);
+    fs.rmSync(src, { force: true });
   }
+  copied.push(name);
 }
 
 removeTrash(trash);
 
-log(`完成，${copied.length} 个资产已拷回 release/`);
+// 剩下的构建副产物直接删掉，出目录里只留 win-unpacked。
+// latest.yml 是 electron-updater 的清单，这条路不走（版本锁死只递增 build，
+// 它比语义版本永远认为最新），留着会让人以为能用。builder-debug.yml 是排查用的，
+// 真出问题重新打一次就有，不必常驻。
+for (const junk of ['latest.yml', 'builder-debug.yml', 'builder-effective-config.yaml']) {
+  fs.rmSync(path.join(outRoot, junk), { force: true });
+}
+
+log(`完成，${copied.length} 个资产已放到 release/`);
 for (const name of copied) log(`  release/${name}`);
 log(`免安装目录版：${path.join(outRoot, 'win-unpacked', 'AgentChat.exe')}`);
-log(`单文件便携版：${path.join(outRoot, `AgentChat-${VERSION}-portable.exe`)}`);
+log(`单文件便携版：${path.join(relDir, `AgentChat-${VERSION}-portable.exe`)}`);
 
 const missing = assets.filter((n) => !copied.includes(n));
 if (missing.length) {
@@ -184,8 +197,10 @@ try {
 }
 
 if (manifest) {
-  const setup = path.join(outRoot, `AgentChat-${VERSION}-setup.exe`);
-  const zip = path.join(outRoot, `AgentChat-${VERSION}-win.zip`);
+  // 读 release/ 里的那份。上面已经把资产从 outRoot 拷过来并删了源文件，
+  // 这里再按 outRoot 找会全部落空，哈希就一直停在上一轮的值上。
+  const setup = path.join(relDir, `AgentChat-${VERSION}-setup.exe`);
+  const zip = path.join(relDir, `AgentChat-${VERSION}-win.zip`);
   if (fs.existsSync(setup)) {
     const d = await digest(setup);
     manifest.sha256 = d.sha256;

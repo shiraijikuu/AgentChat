@@ -12,10 +12,16 @@
 - 界面上「还没配更新源，见 README 的『怎么发更新』」改成说明实际情况。那一节在 README 里早就不存在，而且有了内置源之后这个分支基本走不到。
 - 更新页的「还没查过」补上「启动后会自动查一次」。
 
+### 构建
+
+- 产物目录分工固定下来。出目录 `E:\AgentChat-dist` 只留 `win-unpacked` 供本机直接跑，四个可发布资产（安装包、blockmap、便携版、绿色版 zip）由 `npm run dist` 拷到仓库的 `release/` 并删掉源文件，不两边各留一份。顺带清掉 `latest.yml` 和 `builder-debug.yml` 两个副产物。
+- 校验字段回填改成读 `release/` 里的文件。资产拷走之后源文件就没了，继续读出目录会全部落空，哈希会一直停在上一轮的值上。
+
 ### 验证
 
 - `readUpdateSource` 三种来源实测：什么都不配返回默认地址，设了环境变量返回环境变量，配置文件不存在时退回默认。
 - jsdelivr 地址实测能拉到清单，771 字节，格式正确。
+- `npm run dist` 实跑一次，打完出目录只剩 `win-unpacked`，`release/` 四个资产齐全，`update.json` 回填的哈希与 `Get-FileHash` 独立核对一致。打包版启动后 `/api/health` 返回 `build: 22`。
 
 ## 1.0.0 build 21 — 2026-10-25
 

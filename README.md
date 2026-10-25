@@ -10,7 +10,7 @@
 [![Platform / 平台](https://img.shields.io/badge/platform-Windows-0078D4.svg)](https://github.com/shiraijikuu/AgentChat/releases/latest)
 [![Tech / 技术](https://img.shields.io/badge/tech-Electron%20%2B%20Node.js-3C873A.svg)](https://github.com/shiraijikuu/AgentChat/releases/latest)
 
-- **Version / 版本：** 1.0.0 build 21
+- **Version / 版本：** 1.0.0 build 22
 - **Platform / 平台：** Windows 10 / 11 x64
 - **Author / 作者：** shiraijikuu
 - **AI assistance / AI 协助：** OpenAI Codex、WorkBuddy
