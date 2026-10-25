@@ -1,0 +1,29 @@
+# CI：跑一遍自检。
+#
+# 这个项目没有构建步骤，界面是单个 HTML，主进程直接跑 mjs，所以 CI 不打包，
+# 只验功能。自检会把服务真起起来打接口，202 项断言覆盖身份、频道、@ 解析、
+# 游标、hooks、更新清单这些容易改坏的地方。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # 只出 Windows 包，自检里也有依赖盘符路径解析的用例，所以用 Windows 跑。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Self check (202 assertions)
+        run: npm test

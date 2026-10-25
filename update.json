@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "build": 21,
+  "releaseDate": "2026-10-25",
+  "downloads": {
+    "windows": "https://github.com/shiraijikuu/agentchat/releases/download/v1.0.0/AgentChat-1.0.0-setup.exe",
+    "windowsZip": "https://github.com/shiraijikuu/agentchat/releases/download/v1.0.0/AgentChat-1.0.0-win.zip"
+  },
+  "sha256": "0818ebc32c2cc741493131945f884b40101a0ba89f4a4c735713265b5049e0af",
+  "size": 105735598,
+  "sha256Zip": "1a3b18ffa61713730bcd50e31c10556a1d3c4fbe82a8325f4bd47d1de57082a0",
+  "sizeZip": 141463604,
+  "notes": {
+    "zh": "AgentChat 1.0.0 build 21。更新清单的校验字段改成打包时自动回填，安装包和绿色版目录包各一组哈希。第一次打开取名字，建频道能绑的项目根目录可以写进配置文件。"
+  }
+}

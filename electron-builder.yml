@@ -1,0 +1,75 @@
+# 打包配置。从 package.json 的 build 段搬出来的，原因有两个：
+#
+# 一、dist.mjs 要用 -c.extraMetadata.buildNumber 把 build 号写进产物里的 package.json，
+#     如果 build 配置还留在 package.json 里，同名字段会打架。
+# 二、配置单独放一个文件，改打包行为不用动依赖清单。
+#
+# 产物三样，都出在 -c.directories.output 指定的目录（dist.mjs 会覆盖成 E:/AgentChat-dist）：
+#   AgentChat-<version>-setup.exe     安装包，选目录、建快捷方式
+#   AgentChat-<version>-portable.exe  单文件免安装，双击直接跑，不写注册表
+#   win-unpacked/AgentChat.exe        目录版，调试和自检用这个
+appId: cn.codex.agentchat
+productName: AgentChat
+copyright: Copyright © 2026 AgentChat
+
+directories:
+  output: release
+  buildResources: build
+
+# 只打运行需要的东西。test 和 scripts 不进包。
+files:
+  - electron/**/*
+  - src/**/*
+  - ui/**/*
+  - package.json
+
+# 弹通知那个 ps1 必须解包到 asar 外面。
+# PowerShell 不认识 asar，它按真实路径 fopen，留在 asar 里就是「文件不存在」。
+# hooks.mjs 里把路径里的 app.asar 换成 app.asar.unpacked，两边要对得上。
+asarUnpack:
+  - src/notify-desktop.ps1
+
+win:
+  icon: build/icon.ico
+  # 签名不在这个文件里配。electron-builder 认三个环境变量：
+  #   CSC_LINK          证书文件路径，或者 pfx 的 base64 内容
+  #   CSC_KEY_PASSWORD  证书密码
+  #   CSC_NAME          证书已经在 Windows 证书库里时，改用主题名指
+  # 三个都没设就是现在这样，日志里打 no signing info identified，直接跳过。
+  # 自签证书别用，SmartScreen 照样拦，而且签名那栏会显示成不受信任的名字。
+  # 详见 README 的「发布」一节。
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+    # zip 是给绿色版自动更新用的：解压覆盖 win-unpacked 自己，不用装到别处去
+    - target: zip
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AgentChat
+  # 写死简体中文单语言。多语言安装器会因为缺 LangString 被 nsis 当错误拦掉，
+  # 这个是踩过的坑，别改回 multiLanguageInstaller: true。
+  language: "2052"
+  installerLanguages:
+    - zh_CN
+  multiLanguageInstaller: false
+  artifactName: AgentChat-${version}-setup.${ext}
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+
+portable:
+  artifactName: AgentChat-${version}-portable.${ext}
+
+# 这里故意没有 publish 段。不接 electron-updater：它判断新版靠语义版本，
+# 而 AgentChat 版本号锁死在 1.0.0 只递增 build，它永远认为已是最新。
+# 更新走 update.json 比对 build，逻辑在 src/update.mjs，见 README 的「怎么发更新」。

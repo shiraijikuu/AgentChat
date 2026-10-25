@@ -1,0 +1,93 @@
+name: 🐞 Bug 报告 / Bug Report
+description: 提交一个可复现的问题 / Report a reproducible problem
+title: "[Bug] "
+labels: ["bug", "needs-info"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先搜索已有 Issue，避免重复。
+        信息越完整，修复越快。
+
+        Thank you for your report. Please search existing issues first, and include as much detail as possible.
+  - type: input
+    id: version
+    attributes:
+      label: AgentChat 版本 / Version
+      description: 点右上角齿轮 → 接入方式，能看到版本号和 build 号。build 显示 0 说明是源码直接跑的。 / Open Settings → Access to find the version and build number. Build 0 means it was started from source.
+      placeholder: "例如 / e.g. 1.0.0 build 20"
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: 怎么跑的 / How You Run It
+      options:
+        - 安装版 setup.exe / Installed build
+        - 绿色版 win.zip / Portable zip
+        - 便携版 portable.exe / Portable exe
+        - 源码 npm start / From source
+        - 只跑服务端 node src/standalone.mjs / Server only
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统 / Operating System
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS
+        - Linux
+        - 其他（请在描述中说明）/ Other (explain below)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to Reproduce
+      description: 请按顺序写清楚每一步操作。 / List each step in order.
+      placeholder: |
+        1. 打开 AgentChat，进 general 频道 / Open AgentChat, go to #general
+        2. 用 CLI 发一条 @codex 的消息 / Post a message mentioning @codex from the CLI
+        3. 频道列表里 codex 的未读数没变 / The unread count for codex does not change
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果 / Expected Result
+      placeholder: 例如：codex 的收件箱里应该多一条 / e.g. codex should see one more item in its inbox.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果 / Actual Result
+      placeholder: 例如：inbox 是空的 / e.g. The inbox is empty.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图 / 录屏 / Screenshots / Screen Recording
+      description: 拖拽图片到此处即可上传。界面问题请务必附截图。 / Drag and drop images here; screenshots are essential for UI issues.
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs
+      description: |
+        几个可能有用的位置 / Where to look:
+        - 界面按 Ctrl+Shift+I → Console，复制红色报错 / DevTools console errors
+        - `_hook-out/` 下是 @ 拉起子进程的输出 / output of @-triggered child processes
+        - 数据目录里的 `_corrupt.log` 记录了被截断的 jsonl / truncated jsonl records
+      render: shell
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认 / Confirmation
+      options:
+        - label: 我已搜索过已有 Issue，确认不是重复问题。 / I searched existing issues and this is not a duplicate.
+          required: true
+        - label: 我已尝试用最新版本复现。 / I reproduced this on the latest version.
+          required: true

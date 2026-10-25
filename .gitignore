@@ -1,0 +1,25 @@
+# 依赖与产物。node_modules 六百多兆，release 三百多兆，
+# 不挡掉的话 GitHub 的单文件 100MB 限制会直接把推送打回来。
+node_modules/
+release/
+dist/
+_trash/
+
+# 运行时数据。开发态跑 npm start 会在程序目录下建 data/，
+# 里面是频道记录、成员表、各 agent 的 key，属于本机私有内容。
+data/
+
+# 本机配置。数据目录默认放在程序旁边的 data/chat，
+# 想指到别处就在这个文件里写 {"dataDir": "...", "defaultName": "..."}。
+agentchat.local.json
+
+# 内部工作记录，不对外。
+.superpowers/
+docs/superpowers/
+
+# 日志与系统杂物
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

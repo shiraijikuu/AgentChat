@@ -1,0 +1,2334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentChat</title>
+<!-- 顺手把 favicon 补上。不写这一条浏览器会去要 /favicon.ico，服务端没有这个路径，
+     控制台里就多一条 404，查别的问题时容易分心。 -->
+<link rel="icon" type="image/png" href="./icon.png">
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --border: #e3e5e9; --soft: #eef0f4;
+  --text: #1c1f24; --muted: #6b7280; --accent: #2563eb;
+  --bubble: #ffffff; --bubble-own: #2563eb; --ok: #16a34a; --bad: #dc2626;
+  --ui-font: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d0f13; --panel: #14171d; --border: #262b34; --soft: #1b1f27;
+    --text: #e6e8eb; --muted: #8b929e; --accent: #5b8def;
+    --bubble: #1a1e26; --bubble-own: #2b4b8f; --ok: #4ade80; --bad: #f87171;
+  }
+}
+[data-theme="light"] {
+  --bg: #f6f7f9; --panel: #ffffff; --border: #e3e5e9; --soft: #eef0f4;
+  --text: #1c1f24; --muted: #6b7280; --bubble: #ffffff;
+}
+[data-theme="dark"] {
+  --bg: #0d0f13; --panel: #14171d; --border: #262b34; --soft: #1b1f27;
+  --text: #e6e8eb; --muted: #8b929e; --bubble: #1a1e26;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 14px/1.6 var(--ui-font);
+  overflow: hidden;
+  display: flex; flex-direction: column; height: 100vh;
+}
+.app { display: grid; grid-template-columns: 236px 1fr 214px; flex: 1; min-height: 0; }
+
+/* 自绘标题栏。只在 Electron 里显示，浏览器打开时隐藏，免得出现一条拖不动的假标题栏。
+   高度 34px 必须和 main.mjs 的 TITLEBAR_HEIGHT 一致，否则拖动区和窗口按钮会错位。
+   右边留出 140px 给系统画的三个窗口按钮。 */
+.titlebar {
+  flex: none; height: 34px; display: none; align-items: center; gap: 8px;
+  padding: 0 140px 0 12px; background: var(--bg); color: var(--text);
+  -webkit-app-region: drag; user-select: none;
+}
+body.desktop .titlebar { display: flex; }
+/* 标题栏左边用真图标（ui/icon.png，就是打包进 exe 的那个），别自己画简化版，
+   两处长得不一样会显得像两个应用。 */
+.titlebar .tb-logo { width: 18px; height: 18px; flex: none; display: block; }
+.titlebar .tb-name { font-size: 12px; font-weight: 600; letter-spacing: .2px; }
+
+aside {
+  background: var(--panel); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.brand {
+  padding: 16px 16px 10px; font-weight: 600; font-size: 15px;
+  display: flex; align-items: center; gap: 8px;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); flex: none; }
+.dot.on { background: var(--ok); }
+.brand .sub { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: auto; }
+
+.sect { padding: 10px 16px 4px; font-size: 11px; color: var(--muted); letter-spacing: .4px; }
+.projects { flex: 1; overflow-y: auto; padding: 2px 8px 8px; min-height: 0; }
+.proj {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--muted);
+  user-select: none;
+}
+.proj:hover { background: var(--soft); }
+.proj.active { background: rgba(37,99,235,.12); color: var(--text); font-weight: 500; }
+.proj .nm { flex: 1; overflow: hidden; min-width: 0; }
+/* 频道名一行，绑了项目的话下面再一行说明 */
+.proj .nm .t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj .n { font-size: 11px; opacity: .65; }
+.badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 500;
+  display: none; align-items: center; justify-content: center;
+}
+.badge.on { display: inline-flex; }
+.badge.mention { background: #d97706; }
+
+.me { padding: 10px 12px; border-top: 1px solid var(--border); }
+.settingsEntry {
+  width: 100%; display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 9px;
+  padding: 8px; border: 1px solid transparent; border-radius: 10px; background: transparent;
+  color: var(--text); text-align: left; cursor: pointer; font: inherit;
+}
+.settingsEntry:hover, .settingsEntry:focus-visible { background: var(--soft); border-color: var(--border); outline: none; }
+.settingsEntry .gear {
+  width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-size: 17px;
+}
+.settingsEntry .identity { min-width: 0; }
+.settingsEntry .identity strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.settingsEntry .identity small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settingsBadge { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.idline {
+  margin-top: 6px; font-size: 11px; color: var(--muted);
+  cursor: pointer; user-select: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.idline:hover { color: var(--text); }
+.idline.ok { color: var(--ok); }
+.idline.bad { color: var(--bad); }
+
+main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+header {
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; background: var(--panel);
+}
+header .title { font-size: 15px; font-weight: 600; }
+header .meta { font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header button {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+header button:hover { background: var(--soft); }
+/* 有新版本时顶栏按钮变醒目，平时不显示 */
+header button.hot { border-color: var(--accent); color: var(--accent); }
+
+.stream {
+  flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column;
+  gap: 12px; min-height: 0;
+}
+.msg { display: flex; flex-direction: column; gap: 3px; max-width: 74%; }
+.msg.own { align-self: flex-end; align-items: flex-end; }
+.msg .who { font-size: 11px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.tag { font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid currentColor; opacity: .85; }
+.tag.ask { color: #d97706; }
+.tag.answer { color: #16a34a; }
+.tag.handoff { color: #dc2626; }
+.tag.notice { color: #2563eb; }
+.tag.post { display: none; }
+.tome-mark { font-size: 10px; padding: 0 5px; border-radius: 4px; background: rgba(37,99,235,.16); color: var(--accent); }
+.bubble {
+  background: var(--bubble); border: 1px solid var(--border);
+  padding: 8px 12px; border-radius: 12px; white-space: pre-wrap;
+  word-break: break-word; overflow-wrap: anywhere;
+}
+.msg.own .bubble { background: var(--bubble-own); color: #fff; border-color: transparent; }
+.msg.tome .bubble { box-shadow: 0 0 0 2px rgba(37,99,235,.35); }
+.at { color: var(--accent); font-weight: 500; }
+.msg.own .at { color: #dbeafe; }
+/* @全体成员 比 @个人 更显眼一点，一眼能看出这条是喊所有人的 */
+.at.all { color: #dc2626; font-weight: 600; }
+.msg.own .at.all { color: #fff; }
+/* 文件路径引用。点一下用系统默认程序打开，同时把路径复制到剪贴板。 */
+.fref {
+  color: var(--accent); text-decoration: none; cursor: pointer;
+  border-bottom: 1px dashed currentColor; padding: 0 1px;
+  font-family: ui-monospace, Consolas, monospace; font-size: .94em;
+}
+.fref:hover { background: rgba(37,99,235,.1); }
+.msg.own .fref { color: #dbeafe; border-bottom-color: rgba(219,234,254,.6); }
+.msg.own .fref:hover { background: rgba(255,255,255,.18); }
+.quote {
+  font-size: 11px; color: var(--muted); border-left: 2px solid var(--border);
+  padding-left: 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.empty { color: var(--muted); text-align: center; margin-top: 48px; font-size: 13px; line-height: 2; }
+
+/* 输入框上方的引用条。微信那种手感：显示回复谁和原文开头，右边一个取消。 */
+.replyBar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 20px; border-top: 1px solid var(--border);
+  background: var(--soft); font-size: 12px; color: var(--muted);
+}
+.replyBar .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* display: flex 会盖掉 hidden 自带的 display: none，不写这一条的话没引用时
+   也会留一个孤零零的取消按钮在输入框上方。 */
+.replyBar[hidden] { display: none; }
+.replyBar button {
+  flex: none; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel); color: var(--muted); font: inherit; cursor: pointer;
+}
+.replyBar button:hover { color: var(--text); border-color: var(--accent); }
+.composer {
+  border-top: 1px solid var(--border); padding: 10px 20px 14px;
+  display: flex; gap: 8px; align-items: flex-end; background: var(--panel);
+  position: relative;
+}
+/* @ 补全候选 */
+.ac {
+  position: absolute; bottom: calc(100% - 6px); left: 20px; right: 130px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18); overflow-y: auto; max-height: 216px; z-index: 30;
+}
+.ac .item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 12px;
+  font-size: 13px; cursor: pointer;
+}
+.ac .item.on { background: var(--soft); }
+.ac .item .av {
+  width: 18px; height: 18px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 10px; font-weight: 600;
+}
+.ac .item .hint { margin-left: auto; font-size: 10px; color: var(--muted); }
+/* 补全列表里的「全体成员」跟真人区分开 */
+.ac .item.all .av { background: #dc2626; }
+.ac .item.all { border-bottom: 1px solid var(--border); }
+
+/* 复制路径之后的轻提示，两秒自己消失 */
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%) translateY(8px);
+  background: rgba(17,24,39,.92); color: #fff; font-size: 12px;
+  padding: 7px 14px; border-radius: 999px; opacity: 0; pointer-events: none;
+  transition: opacity .16s, transform .16s; z-index: 60;
+}
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+.composer select {
+  padding: 9px 6px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 13px;
+}
+.composer textarea {
+  flex: 1; resize: none; min-height: 42px; max-height: 160px; padding: 10px 12px;
+  border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font: inherit; outline: none;
+}
+.composer textarea:focus { border-color: var(--accent); }
+.composer button {
+  padding: 10px 18px; border: 0; border-radius: 10px; background: var(--accent);
+  color: #fff; font: inherit; font-weight: 500; cursor: pointer;
+}
+.composer button:disabled { opacity: .45; cursor: default; }
+
+dialog {
+  border: 1px solid var(--border); border-radius: 14px; background: var(--panel);
+  color: var(--text); padding: 20px 22px; max-width: 640px; width: calc(100% - 60px);
+}
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog h2 { margin: 0 0 4px; font-size: 15px; }
+dialog p { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+dialog pre {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; font-size: 12px; line-height: 1.75; overflow-x: auto;
+  font-family: Consolas, "Cascadia Mono", monospace; margin: 0 0 12px;
+  white-space: pre; color: var(--text);
+}
+dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+dialog .row button {
+  padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+dialog .row button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+/* 下载进度条 */
+dialog .bar {
+  height: 6px; border-radius: 3px; background: var(--bg);
+  border: 1px solid var(--border); overflow: hidden; margin: 0 0 14px;
+}
+dialog .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+/* 右侧成员栏 */
+aside.people { border-right: 0; border-left: 1px solid var(--border); }
+.sect { display: flex; align-items: center; gap: 6px; }
+.sect .grow { flex: 1; }
+/* 加号要用 grid 居中。原来靠 line-height: 1 让文字自己居中，
+   18px 的方框里 baseline 会偏，加号看起来就贴在右上角。 */
+.sect button.mini {
+  width: 18px; height: 18px; padding: 0; border-radius: 5px;
+  display: grid; place-items: center; line-height: 1;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+.sect button.mini:hover { background: var(--soft); color: var(--text); }
+
+.members { flex: 1; overflow-y: auto; padding: 2px 8px 8px; min-height: 0; }
+.member {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 8px; cursor: pointer; position: relative;
+}
+.member:hover { background: var(--soft); }
+.member.away { opacity: .55; }
+.member.idle .avatar { filter: grayscale(1); opacity: .5; }
+.avatar {
+  width: 26px; height: 26px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12px; font-weight: 600; letter-spacing: 0;
+}
+.member .info { flex: 1; min-width: 0; }
+.member .nm {
+  font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.member .sub { font-size: 10px; color: var(--muted); line-height: 1.3; }
+.member .act {
+  display: none; width: 20px; height: 20px; padding: 0; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+  font: inherit; font-size: 12px; line-height: 1; cursor: pointer; flex: none;
+}
+.member:hover .act { display: block; }
+.member .act:hover { color: var(--text); background: var(--soft); }
+.peopleFoot {
+  padding: 8px 14px 12px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); line-height: 1.5;
+}
+.pickList { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; margin-bottom: 14px; }
+.pickList button {
+  text-align: left; padding: 8px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 13px;
+}
+.pickList button:hover:not(:disabled) { background: var(--soft); border-color: var(--accent); }
+.pickList button:disabled { opacity: .45; cursor: default; }
+dialog input[type=text] {
+  width: 100%; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; margin-bottom: 8px;
+}
+/* 绑项目那一行：标签在左，下拉在右 */
+dialog .field {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+  font-size: 12px; color: var(--muted);
+}
+dialog .field > span { flex: none; }
+dialog .field select {
+  flex: 1; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 13px;
+}
+/* 选中项目后显示它的工作区和当前状态 */
+dialog .dirInfo {
+  font-size: 11px; color: var(--muted); margin: -2px 0 8px;
+  min-height: 15px; line-height: 1.5;
+}
+
+/* 统一设置中心 */
+dialog.settingsDialog { width: min(900px, calc(100% - 44px)); max-width: 900px; height: min(650px, calc(100% - 44px)); padding: 0; overflow: hidden; }
+.settingsShell { display: grid; grid-template-columns: 184px minmax(0, 1fr); height: 100%; min-height: 0; }
+.settingsNav { padding: 20px 12px; border-right: 1px solid var(--border); background: var(--bg); }
+.settingsNav h2 { padding: 0 10px 14px; font-size: 19px; }
+.settingsNav button {
+  display: block; width: 100%; padding: 9px 11px; margin: 2px 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); text-align: left; cursor: pointer; font: inherit;
+}
+.settingsNav button:hover { background: var(--soft); color: var(--text); }
+.settingsNav button.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; }
+.settingsContent { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.settingsPage { display: none; flex: 1; overflow-y: auto; padding: 28px 32px; }
+.settingsPage.active { display: block; }
+.settingsPage > h2 { font-size: 22px; margin-bottom: 18px; }
+.settingsFoot { padding: 10px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+.settingCard { border: 1px solid var(--border); background: var(--bg); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+.settingCard h3 { margin: 0 0 4px; font-size: 14px; }
+.settingCard > p { margin-bottom: 12px; }
+.settingRow { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.settingRow:first-of-type { border-top: 0; }
+.settingRow > label, .settingRow > span:first-child { flex: 1; }
+/* dialog input[type=text] 是 width:100%，在 flex 行里会把这行占满、把按钮挤到折行，
+   所以这里要改回 auto 加 flex:1，并且去掉它带的 margin-bottom。 */
+.settingRow input[type=text], .settingRow select {
+  flex: 1; width: auto; margin-bottom: 0;
+  min-width: 220px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--panel); color: var(--text); font: inherit;
+}
+.settingsBtn { padding: 8px 13px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; font: inherit; white-space: nowrap; flex-shrink: 0; }
+.settingsBtn:hover { background: var(--soft); }
+.settingsBtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.modeGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0 16px; }
+.modeCard { padding: 11px; border: 2px solid var(--border); border-radius: 11px; background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+.modeCard.active { border-color: var(--accent); }
+/* 必须 display: block。它是个空 span，行内元素上 height 和 margin 都不生效，
+   宽度又由空内容决定为 0，左右两条边框贴在一起就成了文字前面那道竖线。 */
+.modePreview { display: block; height: 48px; border-radius: 7px; margin-bottom: 7px; border: 1px solid var(--border); background: linear-gradient(90deg,#f6f7f9 50%,#14171d 50%); }
+.modeCard[data-mode="light"] .modePreview { background: #f6f7f9; }
+.modeCard[data-mode="dark"] .modePreview { background: #14171d; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--panel); outline: 1px solid var(--border); cursor: pointer; }
+.swatch.active { outline: 2px solid var(--text); }
+.colorInput { display: flex; align-items: center; gap: 8px; }
+.colorInput input[type=color] { width: 42px; height: 30px; border: 0; padding: 0; background: transparent; }
+.settingsHint { min-height: 18px; color: var(--muted); font-size: 12px; }
+.settingsHint.bad { color: var(--bad); }
+.settingsHint.ok { color: var(--ok); }
+details.advanced { margin-top: 10px; }
+details.advanced summary { cursor: pointer; color: var(--muted); padding: 8px 0; }
+@media (max-width: 760px) {
+  .settingsShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .settingsNav { border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; display: flex; gap: 4px; flex-wrap: wrap; }
+  .settingsNav h2 { width: 100%; padding: 0 6px 4px; }
+  .settingsNav button { width: auto; }
+  .settingsPage { padding: 20px; }
+  .settingRow { align-items: flex-start; flex-direction: column; }
+  .settingRow input[type=text], .settingRow select { width: 100%; min-width: 0; }
+}
+/* 频道列表里绑了项目的那一行，副标题 */
+.proj .sub {
+  display: block; font-size: 10px; color: var(--muted); font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.proj.active .sub { color: var(--accent); }
+
+/* 右键频道弹出来的小菜单 */
+.ctx {
+  position: fixed; z-index: 70; min-width: 156px; padding: 5px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.26);
+}
+.ctx button {
+  display: block; width: 100%; text-align: left; padding: 7px 10px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text);
+  font: inherit; font-size: 12px; cursor: pointer;
+}
+.ctx button:hover { background: var(--soft); }
+.ctx button.danger { color: #dc2626; }
+.ctx .sep { height: 1px; background: var(--border); margin: 4px 2px; }
+</style>
+</head>
+<body>
+<div class="titlebar" id="titlebar">
+  <img class="tb-logo" src="./icon.png" alt="" width="18" height="18">
+  <span class="tb-name">AgentChat</span>
+</div>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <span class="dot" id="dot"></span>
+      <span id="connText">连接中</span>
+      <span class="sub" id="portLabel"></span>
+    </div>
+    <div class="sect">
+      <span class="grow">频道</span>
+      <button class="mini" id="btnNewProj" title="新建频道">+</button>
+    </div>
+    <div class="projects" id="projects"></div>
+    <div class="me">
+      <button class="settingsEntry" id="btnSettings" type="button" title="打开设置">
+        <span class="gear">⚙</span>
+        <span class="identity">
+          <strong id="meDisplayName">—</strong>
+          <small class="idline" id="idLine">检查中</small>
+        </span>
+        <span class="settingsBadge" id="settingsBadge" hidden title="有可用更新"></span>
+      </button>
+    </div>
+  </aside>
+  <main>
+    <header>
+      <div class="title" id="projName">加载中</div>
+      <div class="meta" id="projMeta"></div>
+      <button id="btnHow">接入方式</button>
+    </header>
+    <div class="stream" id="stream"></div>
+    <div class="replyBar" id="replyBar" hidden>
+      <span class="txt" id="replyText"></span>
+      <button type="button" id="btnReplyCancel" title="取消引用">取消</button>
+    </div>
+    <form class="composer" id="composer">
+      <select id="msgType">
+        <option value="post">发言</option>
+        <option value="ask">提问</option>
+        <option value="answer">答复</option>
+        <option value="notice">通告</option>
+        <option value="handoff">交接</option>
+      </select>
+      <textarea id="msgBody" placeholder="说点什么。要派活就写 @名字。Enter 发送，Shift+Enter 换行"></textarea>
+      <button type="submit" id="sendBtn">发送</button>
+      <div class="ac" id="ac" hidden></div>
+    </form>
+  </main>  <aside class="people">
+    <div class="sect"><span class="grow" id="peopleHead">成员</span></div>
+    <div class="members" id="members"></div>
+    <div class="peopleFoot" id="peopleFoot"></div>
+  </aside>
+</div>
+
+<dialog id="idDlg">
+  <h2 id="idTitle">身份</h2>
+  <p id="idMsg"></p>
+  <input id="idKey" type="text" placeholder="已经有 key 的话粘在这里，没有就留空" autocomplete="off" spellcheck="false">
+  <p id="idHint" style="min-height:16px"></p>
+  <div class="row">
+    <button id="btnIdClose">关闭</button>
+    <button id="btnIdUseKey">用这把 key</button>
+    <button class="primary" id="btnIdTake">接管这个名字</button>
+  </div>
+</dialog>
+
+<!-- 第一次打开先取名字。名字发第一条消息就锁死，所以这一下必须让人自己定，
+     不能悄悄拿系统用户名顶上。 -->
+<dialog id="firstDlg">
+  <h2>先给自己取个名字</h2>
+  <p>这个名字就是你在频道里的身份。发出第一条消息之后它就锁死了，历史消息里的作者不会跟着改，所以第一次就填成你想要的。</p>
+  <input id="firstName" type="text" placeholder="字母、数字、下划线、连字符" autocomplete="off" spellcheck="false">
+  <p id="firstHint" style="min-height:16px"></p>
+  <div class="row">
+    <button id="btnFirstSkip" type="button">用默认名字</button>
+    <button class="primary" id="btnFirstOk" type="button">就用这个</button>
+  </div>
+</dialog>
+
+<dialog id="newDlg">
+  <h2>新建频道</h2>
+  <p>频道就是一个群。建好之后你就是成员，可以把别人拉进来。</p>
+  <input id="newName" type="text" placeholder="频道名，字母数字下划线连字符" autocomplete="off" spellcheck="false">
+  <label class="field">
+    <span>绑到项目</span>
+    <select id="newDir">
+      <option value="">不绑（光有名字，不知道干什么的）</option>
+    </select>
+  </label>
+  <p id="newDirInfo" class="dirInfo"></p>
+  <input id="newNote" type="text" placeholder="一句话说明这个频道在做什么，可以不填" autocomplete="off">
+  <p id="newHint" style="min-height:16px"></p>
+  <div class="row">
+    <button id="btnNewCancel">取消</button>
+    <button class="primary" id="btnNewOk">建</button>
+  </div>
+</dialog>
+
+<dialog id="renDlg">
+  <h2>改频道名</h2>
+  <p>改完消息、成员、游标都跟着走，旧名字就不存在了。名字只能用字母、数字、下划线、连字符。</p>
+  <input id="renName" type="text" autocomplete="off" spellcheck="false">
+  <p id="renMsg" style="min-height:16px"></p>
+  <div class="row">
+    <button id="btnRenCancel">取消</button>
+    <button class="primary" id="btnRenOk">改</button>
+  </div>
+</dialog>
+
+<dialog id="delDlg">
+  <h2>删频道</h2>
+  <p id="delMsg"></p>
+  <p style="margin-top:-6px">消息不会真删，会挪到数据目录的 _deleted/ 下面留底。频道说明和成员关系一起清掉。</p>
+  <div class="row">
+    <button id="btnDelCancel">取消</button>
+    <button class="primary" id="btnDelOk" style="background:#dc2626">删掉</button>
+  </div>
+</dialog>
+
+<dialog id="inviteDlg">
+  <h2 id="inviteTitle">拉人</h2>
+  <p id="inviteHint">选一个频道，把他加进去。已经在里面的会标出来。</p>
+  <div class="pickList" id="inviteList"></div>
+  <div class="row">
+    <button id="btnInviteClose">关闭</button>
+  </div>
+</dialog>
+
+<dialog id="howDlg">
+  <h2>让 agent 接进来</h2>
+  <p>服务已经跑在 <span id="howBase"></span>，agent 不用起服务，直接用命令。</p>
+  <pre id="howCmd"></pre>
+  <p>约定：agent 名只能用字母数字下划线连字符，别用中文。所有写入都走服务，别直接改 jsonl。</p>
+  <p id="howVer"></p>
+  <div class="row">
+    <button id="btnCopyCmd">复制命令</button>
+    <button class="primary" id="btnCloseHow">知道了</button>
+  </div>
+</dialog>
+
+<dialog id="settingsDlg" class="settingsDialog">
+  <div class="settingsShell">
+    <nav class="settingsNav" aria-label="设置分类">
+      <h2>设置</h2>
+      <button type="button" class="active" data-settings-page="identity">身份</button>
+      <button type="button" data-settings-page="appearance">外观</button>
+      <button type="button" data-settings-page="update">更新</button>
+      <button type="button" data-settings-page="behavior">行为</button>
+    </nav>
+    <div class="settingsContent">
+      <section class="settingsPage active" data-page="identity">
+        <h2>身份</h2>
+        <div class="settingCard">
+          <h3>当前名字</h3>
+          <p>切换当前使用的 agent 身份，不会改写历史消息。</p>
+          <div class="settingRow">
+            <input id="meName" type="text" autocomplete="off" spellcheck="false" aria-label="当前名字">
+            <button class="settingsBtn primary" id="btnSaveName" type="button">保存名字</button>
+          </div>
+          <div class="settingsHint" id="settingsIdentityStatus"></div>
+        </div>
+      </section>
+
+      <section class="settingsPage" data-page="appearance">
+        <h2>外观</h2>
+        <div class="settingCard">
+          <h3>模式</h3>
+          <div class="modeGrid">
+            <button class="modeCard" type="button" data-mode="system"><span class="modePreview"></span>跟随系统</button>
+            <button class="modeCard" type="button" data-mode="light"><span class="modePreview"></span>浅色</button>
+            <button class="modeCard" type="button" data-mode="dark"><span class="modePreview"></span>深色</button>
+          </div>
+          <div class="settingRow">
+            <span>强调色</span>
+            <div class="swatches" id="accentSwatches">
+              <button class="swatch" type="button" data-accent="#2563EB" style="background:#2563eb" title="蓝色"></button>
+              <button class="swatch" type="button" data-accent="#7C3AED" style="background:#7c3aed" title="紫色"></button>
+              <button class="swatch" type="button" data-accent="#DB2777" style="background:#db2777" title="粉色"></button>
+              <button class="swatch" type="button" data-accent="#EA580C" style="background:#ea580c" title="橙色"></button>
+              <button class="swatch" type="button" data-accent="#059669" style="background:#059669" title="绿色"></button>
+            </div>
+          </div>
+          <div class="settingRow">
+            <label for="appearanceFont">字体</label>
+            <select id="appearanceFont">
+              <option value="system">系统默认</option>
+              <option value="segoe-ui">Segoe UI</option>
+              <option value="microsoft-yahei">微软雅黑</option>
+            </select>
+          </div>
+          <details class="advanced" id="appearanceAdvanced">
+            <summary>高级自定义</summary>
+            <div class="settingRow"><span>自定义强调色</span><span class="colorInput"><input id="appearanceAccent" type="color"><code id="appearanceAccentHex"></code></span></div>
+            <div class="settingRow"><span>背景</span><span class="colorInput"><input id="appearanceBackground" type="color"><code id="appearanceBackgroundHex"></code></span></div>
+            <div class="settingRow"><span>前景文字</span><span class="colorInput"><input id="appearanceForeground" type="color"><code id="appearanceForegroundHex"></code></span></div>
+          </details>
+          <div class="settingsHint" id="appearanceHint"></div>
+          <div class="row">
+            <button class="settingsBtn" id="btnResetAppearance" type="button">恢复默认</button>
+            <button class="settingsBtn primary" id="btnSaveAppearance" type="button">保存外观</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="settingsPage" data-page="update">
+        <h2>更新</h2>
+        <div class="settingCard">
+          <h3 id="updTitle">检查更新</h3>
+          <p id="updMsg"></p>
+          <pre id="updNotes" hidden></pre>
+          <div class="bar" id="updBarWrap" hidden><div id="updBar"></div></div>
+          <div class="row">
+            <button class="settingsBtn" id="btnUpdCheck" type="button">检查更新</button>
+            <button class="settingsBtn primary" id="btnUpdDownload" type="button" hidden>下载</button>
+            <button class="settingsBtn primary" id="btnUpdInstall" type="button" hidden>装好并重启</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="settingsPage" data-page="behavior">
+        <h2>行为</h2>
+        <div class="settingCard">
+          <h3>关闭窗口时</h3>
+          <p>最小化到托盘后，本地服务和 agent 通知会继续运行。</p>
+          <div class="settingRow">
+            <label for="closeAction">关闭按钮行为</label>
+            <select id="closeAction">
+              <option value="ask">每次询问</option>
+              <option value="tray">最小化到托盘</option>
+              <option value="quit">退出应用</option>
+            </select>
+          </div>
+          <div class="settingsHint" id="behaviorHint"></div>
+        </div>
+      </section>
+
+      <div class="settingsFoot">
+        <button class="settingsBtn primary" id="btnSettingsClose" type="button">完成</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- 右键频道弹出来的菜单。位置由 JS 按鼠标坐标摆，点别处就收。 -->
+<div id="ctxMenu" class="ctx" hidden></div>
+
+<script type="module">
+import { appearanceToCss, contrastRatio } from './appearance.mjs';
+const $ = (id) => document.getElementById(id);
+const meInput = $('meName');
+// 默认名字不再写死在界面里。
+// 名字发第一条消息就锁死，写死的话谁下载下来都叫作者那个名字，而且改不掉。
+// 真正的值由服务端给，来源是机器级配置或系统用户名，见 src/paths.mjs。
+// 这里先留空，启动拿到 /api/health 再填。
+let defaultName = 'agent';
+meInput.value = localStorage.getItem('chat.me') || '';
+
+// ---- 身份 ----
+// 界面对服务端来说也是一个 agent，得有自己的 key。
+//
+// key 真正的家是数据目录里的 .agents/<名字>.key，不是 localStorage。
+// localStorage 是按 origin 分的，界面跑在 http://127.0.0.1:端口 上，端口一变
+// （7788 被占就换 7789）就是另一份存储，换个安装目录 userData 变了也一样。
+// 只存 localStorage 的话表现就是每次重进都要重新接管名字。
+// 本地那份只是缓存，读不到就问服务端要，拿到之后两边都写。
+//
+// 名字被别人锁着的时候，要么粘对方的 key，要么接管（换新 key，旧 key 立刻失效）。
+function myKey() {
+  try { return localStorage.getItem('chat.key') || null; } catch { return null; }
+}
+function setMyKey(k) {
+  try {
+    if (k) localStorage.setItem('chat.key', k);
+    else localStorage.removeItem('chat.key');
+  } catch {}
+}
+function newKey() {
+  const a = new Uint8Array(24);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 数据目录里那份。服务端没有就返回 null。
+async function serverKey(name) {
+  try {
+    const r = await fetch('/api/key?name=' + encodeURIComponent(name));
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.key || null;
+  } catch {
+    return null;
+  }
+}
+
+// 把 key 落进数据目录，下次换端口换目录都还在
+function saveServerKey(name, key) {
+  fetch('/api/key', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, key }),
+  }).catch(() => {});
+}
+
+let idState = { name: '', ok: false, agent: null };
+
+function renderIdLine() {
+  const el = $('idLine');
+  $('meDisplayName').textContent = meInput.value.trim() || '未命名';
+  el.className = 'idline';
+  if (!idState.name) {
+    el.textContent = '还没设名字';
+    $('settingsIdentityStatus').textContent = '还没检查身份';
+    return;
+  }
+  if (idState.ok) {
+    el.classList.add('ok');
+    el.textContent = `已绑定 ${idState.agent?.id || ''}`.trim();
+    $('settingsIdentityStatus').textContent = `已绑定 ${idState.agent?.id || ''}`.trim();
+  } else if (idState.agent) {
+    el.classList.add('bad');
+    el.textContent = '名字被占用';
+    $('settingsIdentityStatus').textContent = '这个名字由另一把 key 锁定，保存后会进入身份处理。';
+  } else {
+    el.textContent = '未绑定';
+    $('settingsIdentityStatus').textContent = '这个名字还没有绑定。';
+  }
+}
+
+async function checkIdentity(force = false) {
+  const name = meInput.value.trim();
+  if (!name) {
+    idState = { name: '', ok: false, agent: null };
+    renderIdLine();
+    return idState;
+  }
+  if (!force && idState.name === name && idState.ok) return idState;
+
+  const post = async (k) => {
+    const r = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, key: k || undefined }),
+    });
+    return r.json();
+  };
+
+  let k = myKey();
+  let d = null;
+  try {
+    d = await post(k);
+  } catch {
+    idState = { name, ok: false, agent: null };
+    renderIdLine();
+    return idState;
+  }
+
+  // 本地那把不认（缓存是旧的，或者根本没缓存），去数据目录里找那份
+  if (!d.usable) {
+    const remote = await serverKey(name);
+    if (remote && remote !== k) {
+      try {
+        const d2 = await post(remote);
+        if (d2.usable) { k = remote; d = d2; }
+      } catch {}
+    }
+  }
+
+  // 第一次接入，服务端会签发一把新的，拿回来存好
+  if (!k && d.key) k = d.key;
+  if (d.usable && k) {
+    setMyKey(k);
+    saveServerKey(name, k);
+  }
+
+  idState = { name, ok: !!d.usable, agent: d.agent || null };
+  renderIdLine();
+  return idState;
+}
+
+function openIdDlg() {
+  const name = meInput.value.trim();
+  $('idTitle').textContent = `身份：${name || '未命名'}`;
+  $('idKey').value = '';
+  $('idHint').textContent = '';
+  if (idState.ok) {
+    $('idMsg').textContent = `这个名字是你的，id ${idState.agent?.id || ''}。key 存在数据目录的 .agents 里，换端口换目录都不会丢。`;
+    $('idKey').hidden = true;
+    $('btnIdTake').hidden = true;
+    $('btnIdUseKey').hidden = true;
+  } else if (idState.agent) {
+    const at = String(idState.agent.createdAt || '').slice(0, 16).replace('T', ' ');
+    $('idMsg').textContent =
+      `这个名字已经被别的 key 锁住了，id ${idState.agent.id}，首次接入 ${at}。`
+      + '要么把当初那把 key 粘进来，要么接管它。接管会换一把新 key，原来那把立刻失效。';
+    $('idKey').hidden = false;
+    $('btnIdTake').hidden = false;
+    $('btnIdUseKey').hidden = false;
+  } else {
+    $('idMsg').textContent = '这个名字还没人用，点「用这把 key」就能占下来，留空会随机生成一把。';
+    $('idKey').hidden = false;
+    $('btnIdTake').hidden = true;
+    $('btnIdUseKey').hidden = false;
+  }
+  $('idDlg').showModal();
+}
+
+$('btnIdClose').addEventListener('click', () => $('idDlg').close());
+
+$('btnIdUseKey').addEventListener('click', async () => {
+  const name = meInput.value.trim();
+  if (!name) {
+    $('idHint').textContent = '先在上面填个名字';
+    return;
+  }
+  const k = $('idKey').value.trim() || myKey() || newKey();
+  const r = await fetch('/api/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, key: k }),
+  });
+  const d = await r.json();
+  if (!d.usable) {
+    $('idHint').textContent = '这把 key 对不上。再试试别的，或者直接接管。';
+    return;
+  }
+  setMyKey(k);
+  saveServerKey(name, k);
+  idState = { name, ok: true, agent: d.agent };
+  renderIdLine();
+  $('idDlg').close();
+  renderMessages();
+});
+
+$('btnIdTake').addEventListener('click', async () => {
+  const name = meInput.value.trim();
+  if (!confirm(`接管 ${name}？会换一把新 key，原来那把立刻不能用了。`)) return;
+  const r = await fetch('/api/reset-key', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, by: 'ui' }),
+  });
+  const d = await r.json();
+  if (!r.ok) {
+    $('idHint').textContent = d.error || '接管失败';
+    return;
+  }
+  setMyKey(d.key);
+  saveServerKey(name, d.key);
+  idState = { name, ok: true, agent: d.agent };
+  renderIdLine();
+  $('idDlg').close();
+  renderMessages();
+});
+
+$('btnSaveName').addEventListener('click', async () => {
+  const v = meInput.value.trim() || defaultName;
+  meInput.value = v;
+  localStorage.setItem('chat.me', v);
+  idState = { name: '', ok: false, agent: null };
+  await checkIdentity(true);
+  renderMessages();
+  if (!idState.ok) {
+    $('settingsDlg').close();
+    openIdDlg();
+  }
+});
+
+const state = {
+  project: localStorage.getItem('chat.project') || 'general',
+  messages: [],
+  seen: new Set(),
+  unread: {},
+  mentionUnread: {},
+  agents: {},
+  projects: [],
+  members: [],
+  isMain: false,
+  inviteName: null,
+  // 右键菜单里正在操作的频道
+  renFrom: null,
+  delName: null,
+  // 正在引用回复的那条消息，发送时作为 replyTo 带上去
+  replyTo: null,
+  port: location.port || '7788',
+  online: false,
+};
+
+$('portLabel').textContent = ':' + state.port;
+
+// 自绘标题栏只在桌面壳里出现。浏览器里打开时保持原样，不然顶部会多出一条拖不动的空条。
+if (navigator.userAgent.includes('Electron')) {
+  document.body.classList.add('desktop');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 文件路径。跟服务端 parseFileRefs 认的是同一套：带盘符的绝对路径，可选行号。
+// 先换成占位符再转义，否则路径里的 & 会被转成 &amp; 把链接搞坏。
+// 中文标点要当分隔符，不然「看 E:/a.mjs，还有 B」会把「，还有」吞进路径。
+const WIN_PATH_RE = /[A-Za-z]:[\\/][^\s"'`<>|*?\n，。；：！？、（）【】「」『』《》…]*/g;
+const TRAIL_PUNCT = '.,;!?)]}>、。，；：！？）」』】…';
+
+function trimPathTail(raw) {
+  let s = raw;
+  while (s.length > 3 && TRAIL_PUNCT.includes(s[s.length - 1])) s = s.slice(0, -1);
+  return s;
+}
+
+// 打开文件只认路径本身，行号不能带进去，否则 extname 拿到 ".mjs:64" 就判断不出来
+function pathHref(p) {
+  const bare = String(p).replace(/:(\d+)(?:-(\d+))?$/, '');
+  const norm = bare.replace(/\\/g, '/');
+  return 'file:///' + norm.replace(/^\/+/, '');
+}
+
+function bodyHtml(text) {
+  const refs = [];
+  let s = String(text).replace(WIN_PATH_RE, (raw) => {
+    const clean = trimPathTail(raw);
+    if (clean.length < 4) return raw;
+    refs.push(clean);
+    return `\uE000${refs.length - 1}\uE001`;
+  });
+
+  s = escapeHtml(s);
+  // @全体成员 先处理：中文不在 @名字 的字符集里，顺序其实无所谓，放前面更直观
+  s = s.replace(/@(全体成员|all|everyone|here)(?![A-Za-z0-9_-])/gi,
+    (m) => `<span class="at all">${m}</span>`);
+  s = s.replace(/@([A-Za-z0-9_-]{1,64})/g, '<span class="at">@$1</span>');
+
+  s = s.replace(/\uE000(\d+)\uE001/g, (_, i) => {
+    const p = refs[Number(i)];
+    const esc = escapeHtml(p);
+    return `<a class="fref" href="${escapeHtml(pathHref(p))}" data-path="${esc}" target="_blank" title="点击用默认程序打开，路径会同时复制">${esc}</a>`;
+  });
+  return s;
+}
+function fmtTime(ts) { return String(ts || '').slice(11, 16); }
+
+// 活跃度用相对时间，比时间戳好读
+function agoText(ts) {
+  if (!ts) return '还没动静';
+  const t = Date.parse(ts);
+  if (!t) return '';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return '刚刚';
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
+  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
+  return `${Math.floor(s / 86400)} 天前`;
+}
+// 超过 15 分钟没动静算不活跃，图标变灰
+function isIdle(ts) {
+  const t = Date.parse(ts || '');
+  return !t || Date.now() - t > 15 * 60 * 1000;
+}
+
+function setOnline(on) {
+  state.online = on;
+  $('dot').classList.toggle('on', on);
+  // 应用名已经搬到标题栏了，这里只留连接状态，免得同一句话出现两遍
+  const t = $('connText');
+  if (t) t.textContent = on ? '已连接' : '连接断开';
+}
+
+function renderProjects(list) {
+  const box = $('projects');
+  box.innerHTML = '';
+  if (!list.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.style.marginTop = '20px';
+    e.textContent = '还没有项目';
+    box.appendChild(e);
+    return;
+  }
+  // general 是主频道，固定排最上面
+  const ordered = list.slice().sort((a, b) => {
+    if (a.name === 'general') return -1;
+    if (b.name === 'general') return 1;
+    return 0;
+  });
+  for (const p of ordered) {
+    const el = document.createElement('div');
+    el.className = 'proj' + (p.name === state.project ? ' active' : '');
+    // 绑了项目的频道，鼠标停上去能看到绑的是哪个目录、在做什么
+    const tip = [p.last ? `${p.last.from}：${p.last.body}` : '还没有消息'];
+    if (p.dir) tip.push(`绑在项目 ${p.dir}`);
+    if (p.note) tip.push(p.note);
+    el.title = tip.join('\n');
+
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    const title = document.createElement('span');
+    title.className = 't';
+    title.textContent = p.name;
+    nm.appendChild(title);
+    // 副标题优先显示人写的说明，没写就显示绑的项目名
+    if (p.note || p.dir) {
+      const sub = document.createElement('span');
+      sub.className = 'sub';
+      sub.textContent = p.note || p.dir;
+      nm.appendChild(sub);
+    }
+
+    const right = document.createElement('span');
+    const mu = state.mentionUnread[p.name] || 0;
+    const un = state.unread[p.name] || 0;
+    if (p.name !== state.project && (mu || un)) {
+      right.className = 'badge on' + (mu ? ' mention' : '');
+      right.textContent = mu ? '@' + mu : un;
+    } else {
+      right.className = 'n';
+      right.textContent = p.count;
+    }
+    el.append(nm, right);
+    el.onclick = () => switchProject(p.name);
+    // 右键改名或删频道
+    el.oncontextmenu = (e) => {
+      e.preventDefault();
+      openCtx(p, e.clientX, e.clientY);
+    };
+    box.appendChild(el);
+  }
+}
+
+function renderMessages() {
+  const box = $('stream');
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  box.innerHTML = '';
+  const me = meInput.value.trim();
+  if (!state.messages.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.innerHTML = '这个项目还没有消息。<br>下面输入框写一句就有第一条了。';
+    box.appendChild(e);
+    return;
+  }
+  for (const m of state.messages) {
+    const ms = Array.isArray(m.mentions) ? m.mentions : [];
+    const mentioned = ms.includes(me) && m.from !== me;
+    const wrap = document.createElement('div');
+    wrap.className = 'msg' + (m.from === me ? ' own' : '') + (mentioned ? ' tome' : '');
+    // 右键这条消息，可以引用回复，也可以复制
+    wrap.oncontextmenu = (e) => {
+      e.preventDefault();
+      openMsgCtx(m, e.clientX, e.clientY);
+    };
+
+    const who = document.createElement('div');
+    who.className = 'who';
+    const name = document.createElement('span');
+    name.textContent = m.from;
+    who.appendChild(name);
+    if (m.type && m.type !== 'post') {
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + m.type;
+      tag.textContent = { ask: '提问', answer: '答复', notice: '通告', handoff: '交接' }[m.type] || m.type;
+      who.appendChild(tag);
+    }
+    if (mentioned) {
+      const mk = document.createElement('span');
+      mk.className = 'tome-mark';
+      mk.textContent = '提到你';
+      who.appendChild(mk);
+    }
+    const time = document.createElement('span');
+    time.textContent = fmtTime(m.ts);
+    who.appendChild(time);
+
+    if (m.replyTo) {
+      const target = state.messages.find((x) => x.id === m.replyTo);
+      const q = document.createElement('div');
+      q.className = 'quote';
+      q.textContent = target ? `回复 ${target.from}：${target.body.slice(0, 50)}` : `回复 ${m.replyTo}`;
+      wrap.append(who, q);
+    } else {
+      wrap.appendChild(who);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = bodyHtml(m.body);
+    wrap.appendChild(bubble);
+    box.appendChild(wrap);
+  }
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function renderHeader() {
+  $('projName').textContent = state.project;
+  // 绑了项目的频道，把说明放在最前面，一眼知道这个频道在干什么
+  const cur = state.projects.find((p) => p.name === state.project) || {};
+  const parts = [];
+  if (cur.note) parts.push(cur.note);
+  else if (cur.dir) parts.push('项目 ' + cur.dir);
+  parts.push(`${state.messages.length} 条`);
+  if (state.members.length) parts.push(`${state.members.length} 人`);
+  if (state.isMain) parts.push('主频道');
+  $('projMeta').textContent = parts.join(' · ');
+}
+
+// 名字转成稳定的颜色，同一个 agent 在列表和消息里看起来一致
+function colorOf(name) {
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 52% 48%)`;
+}
+
+async function loadMembers() {
+  try {
+    const d = await (await fetch('/api/members?project=' + encodeURIComponent(state.project))).json();
+    state.members = d.members || [];
+    state.isMain = !!d.main;
+    renderMembers();
+    renderHeader();
+  } catch {
+    state.members = [];
+    renderMembers();
+  }
+}
+
+function renderMembers() {
+  const box = $('members');
+  box.innerHTML = '';
+  $('peopleHead').textContent = state.isMain
+    ? `成员 ${state.members.length} · 全部`
+    : `成员 ${state.members.length}`;
+
+  if (!state.members.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.style.marginTop = '16px';
+    e.textContent = '这个频道还没有成员';
+    box.appendChild(e);
+  }
+
+  for (const m of state.members) {
+    const el = document.createElement('div');
+    el.className = 'member' + (m.joined ? '' : ' away') + (isIdle(m.lastSeen) ? ' idle' : '');
+    el.title = `${m.name}  ${m.id}\n最后活跃 ${agoText(m.lastSeen)}` + (m.joined ? '' : '\n还没在这个频道发过言');
+
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.textContent = (String(m.name)[0] || '?').toUpperCase();
+    av.style.background = colorOf(m.name);
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = m.name;
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = String(m.id || '').replace(/^ag_/, '')
+      + ' · ' + agoText(m.lastSeen)
+      + (m.locked ? '' : ' · 未锁');
+    info.append(nm, sub);
+
+    const add = document.createElement('button');
+    add.className = 'act';
+    add.textContent = '+';
+    add.title = '拉进其他频道';
+    add.onclick = (e) => { e.stopPropagation(); openInvite(m.name); };
+
+    el.append(av, info, add);
+
+    if (!state.isMain) {
+      const out = document.createElement('button');
+      out.className = 'act';
+      out.textContent = '−';
+      out.title = '移出本频道';
+      out.onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm(`把 ${m.name} 移出 ${state.project}？消息不会删。`)) return;
+        await fetch('/api/kick', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ project: state.project, name: m.name }),
+        });
+        loadMembers();
+      };
+      el.appendChild(out);
+    }
+
+    // 点一下把 @名字 填进输入框
+    el.onclick = () => {
+      const box = $('msgBody');
+      const cur = box.value;
+      box.value = (cur && !cur.endsWith(' ') ? cur + ' ' : cur) + '@' + m.name + ' ';
+      box.focus();
+    };
+    box.appendChild(el);
+  }
+
+  if (!state.members.length) {
+    $('peopleFoot').textContent = state.isMain
+      ? '还没有 agent 接入'
+      : '这个频道还没人，点上面的 + 新建，或者用 invite 拉人进来';
+    return;
+  }
+
+  $('peopleFoot').textContent = state.isMain
+    ? 'general 是主频道，所有 agent 都在这里，移不出去'
+    : '点成员右边的 + 把他拉进别的频道';
+}
+
+async function openInvite(name) {
+  state.inviteName = name;
+  $('inviteTitle').textContent = `把 ${name} 拉进哪个频道`;
+  const member = state.members.find((x) => x.name === name);
+  const joined = new Set(member ? member.channels : []);
+  const list = $('inviteList');
+  list.innerHTML = '';
+
+  for (const p of state.projects) {
+    const b = document.createElement('button');
+    const has = joined.has(p.name);
+    b.textContent = p.name + (has ? '  已加入' : '');
+    b.disabled = has;
+    b.onclick = async () => {
+      const r = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project: p.name, name }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        alert(d.error || '拉人失败');
+        return;
+      }
+      $('inviteDlg').close();
+      loadMembers();
+      loadProjects();
+    };
+    list.appendChild(b);
+  }
+  if (!state.projects.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = '还没有频道，先建一个';
+    list.appendChild(e);
+  }
+  $('inviteDlg').showModal();
+}
+
+async function loadProjects() {
+  try {
+    const d = await (await fetch('/api/projects')).json();
+    state.agents = d.agents || {};
+    state.projects = d.projects || [];
+    renderProjects(state.projects);
+    setOnline(true);
+    return state.projects;
+  } catch {
+    setOnline(false);
+    return [];
+  }
+}
+
+async function loadMessages(project) {
+  const d = await (await fetch('/api/messages?project=' + encodeURIComponent(project))).json();
+  state.messages = d.messages || [];
+  state.seen = new Set(state.messages.map((m) => m.id));
+  state.unread[project] = 0;
+  state.mentionUnread[project] = 0;
+  renderMessages();
+  renderHeader();
+}
+
+async function switchProject(name) {
+  state.project = name;
+  // 引用的是上一个频道里的消息，换频道就作废，不然 replyTo 指过去也对不上
+  cancelReply();
+  localStorage.setItem('chat.project', name);
+  await loadMessages(name);
+  await loadProjects();
+  await loadMembers();
+}
+
+$('btnReplyCancel').addEventListener('click', () => { cancelReply(); $('msgBody').focus(); });
+
+$('composer').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = $('msgBody').value.trim();
+  if (!body) return;
+  const btn = $('sendBtn');
+  btn.disabled = true;
+  try {
+    // 没绑定就先绑一次。名字被别人锁着的话，这里会拦下来并弹身份对话框。
+    if (!idState.ok) {
+      const st = await checkIdentity(true);
+      if (!st.ok) {
+        openIdDlg();
+        return;
+      }
+    }
+    const r = await fetch('/api/post', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        project: state.project,
+        from: meInput.value.trim() || defaultName,
+        agentKey: myKey(),
+        type: $('msgType').value,
+        body,
+        // 引用回复。服务端会核对这条 id 确实在本频道，原文作者没被 @ 就自动补一个。
+        replyTo: state.replyTo?.id || null,
+        clientKey: 'ui-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      if (r.status === 409) {
+        await checkIdentity(true);
+        openIdDlg();
+        return;
+      }
+      throw new Error(d.error || '发送失败');
+    }
+    // 服务端第一次签发 key 时只回这一次，界面前几版没接，key 就丢了。
+    // 现在不管绑没绑，只要响应里带了就存下来。
+    if (d.agentKey) {
+      setMyKey(d.agentKey);
+      idState = { name: meInput.value.trim(), ok: true, agent: d.agent };
+      renderIdLine();
+    }
+    $('msgBody').value = '';
+    cancelReply();
+    if (!state.seen.has(d.msg.id)) {
+      state.seen.add(d.msg.id);
+      state.messages.push(d.msg);
+      renderMessages();
+      renderHeader();
+    }
+    loadProjects();
+    // 发言会自动把自己加进这个频道，成员栏要跟着更新
+    loadMembers();
+  } catch (err) {
+    alert('发送失败：' + err.message);
+  } finally {
+    btn.disabled = false;
+    $('msgBody').focus();
+  }
+});
+
+// ---- @ 补全 ----
+// 在输入框里打到 @ 就弹当前频道的成员，上下选、回车插入。跟 QQ 微信一个手感。
+const acState = { open: false, items: [], idx: 0, start: -1 };
+
+function acClose() {
+  acState.open = false;
+  acState.items = [];
+  acState.idx = 0;
+  $('ac').hidden = true;
+  $('ac').innerHTML = '';
+}
+
+function acRender() {
+  const box = $('ac');
+  box.innerHTML = '';
+  acState.items.forEach((m, i) => {
+    const el = document.createElement('div');
+    el.className = 'item' + (i === acState.idx ? ' on' : '') + (m.all ? ' all' : '');
+    const av = document.createElement('span');
+    av.className = 'av';
+    av.textContent = m.all ? '全' : (String(m.name)[0] || '?').toUpperCase();
+    av.style.background = m.all ? '#dc2626' : colorOf(m.name);
+    const nm = document.createElement('span');
+    nm.textContent = m.name;
+    const hint = document.createElement('span');
+    hint.className = 'hint';
+    // 「全体成员」只代表本频道的人，把人数写出来免得误会成全站广播
+    hint.textContent = m.all ? `${state.members.length} 人` : agoText(m.lastSeen);
+    el.append(av, nm, hint);
+    // mousedown 而不是 click：click 会先让 textarea 失焦，光标位置就丢了
+    el.onmousedown = (e) => { e.preventDefault(); acPick(i); };
+    box.appendChild(el);
+  });
+  box.hidden = false;
+  const on = box.querySelector('.item.on');
+  if (on) on.scrollIntoView({ block: 'nearest' });
+}
+
+function acUpdate() {
+  const box = $('msgBody');
+  const pos = box.selectionStart;
+  const before = box.value.slice(0, pos);
+  // @ 前面必须是行首或者空白，避免把邮箱那种 @ 也当成提及。
+  // 字符集要带中文，否则打 @全 的时候补不出来。
+  const m = before.match(/(^|\s)@([A-Za-z0-9_\-\u4e00-\u9fa5]*)$/);
+  if (!m) return acClose();
+  const q = m[2].toLowerCase();
+
+  const items = [];
+  // 「全体成员」永远排第一：@ 后面什么都没打的时候它就在最上面
+  if ('全体成员'.startsWith(m[2]) || 'all'.startsWith(q) || !q) {
+    items.push({ name: '全体成员', all: true, lastSeen: null });
+  }
+  for (const x of state.members) {
+    if (items.length >= 9) break;
+    if (x.name.toLowerCase().startsWith(q)) items.push(x);
+  }
+  if (!items.length) return acClose();
+  acState.open = true;
+  acState.items = items;
+  acState.idx = 0;
+  acState.start = pos - m[2].length - 1;
+  acRender();
+}
+
+function acPick(i) {
+  const it = acState.items[i];
+  if (!it) return;
+  const box = $('msgBody');
+  const pos = box.selectionStart;
+  const head = box.value.slice(0, acState.start);
+  const tail = box.value.slice(pos);
+  const insert = '@' + it.name + ' ';
+  box.value = head + insert + tail;
+  const np = head.length + insert.length;
+  box.setSelectionRange(np, np);
+  acClose();
+  box.focus();
+}
+
+$('msgBody').addEventListener('input', acUpdate);
+$('msgBody').addEventListener('blur', () => setTimeout(acClose, 120));
+$('msgBody').addEventListener('click', acClose);
+
+$('msgBody').addEventListener('keydown', (e) => {
+  if (acState.open) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      acState.idx = (acState.idx + 1) % acState.items.length;
+      acRender();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      acState.idx = (acState.idx - 1 + acState.items.length) % acState.items.length;
+      acRender();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      acPick(acState.idx);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      acClose();
+      return;
+    }
+  }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    $('composer').requestSubmit();
+  }
+});
+
+// SSE 断线后浏览器会自动重连，这里只负责把状态点改回来
+const es = new EventSource('/api/stream');
+es.onopen = () => setOnline(true);
+es.onerror = () => setOnline(false);
+es.onmessage = (ev) => {
+  let d;
+  try { d = JSON.parse(ev.data); } catch { return; }
+  if (d.kind === 'message') {
+    const me = meInput.value.trim();
+    if (d.project === state.project) {
+      if (!state.seen.has(d.msg.id)) {
+        state.seen.add(d.msg.id);
+        state.messages.push(d.msg);
+        renderMessages();
+        renderHeader();
+      }
+    } else {
+      state.unread[d.project] = (state.unread[d.project] || 0) + 1;
+      if (Array.isArray(d.msg.mentions) && d.msg.mentions.includes(me)) {
+        state.mentionUnread[d.project] = (state.mentionUnread[d.project] || 0) + 1;
+      }
+    }
+    loadProjects();
+  } else if (d.kind === 'refresh') {
+    loadProjects();
+    // 新建频道对话框开着的时候，项目列表也跟着刷新一次。
+    // 这样别人刚在 AGENTS 下建了项目夹，这边不用关掉重开。
+    if ($('newDlg').open) refreshDirOptions();
+  }
+};
+
+// 重拉项目列表并重建下拉框，把当前选中的那项保留住
+async function refreshDirOptions() {
+  const keep = $('newDir').value;
+  await loadAgentProjects();
+  fillDirOptions();
+  if (keep) $('newDir').value = keep;
+  renderDirInfo();
+}
+
+$('btnHow').addEventListener('click', async () => {
+  const base = location.origin;
+  $('howBase').textContent = base;
+  // 版本指纹。装的是哪个包、连的是哪个实例，在这里一眼对上。
+  // build 0 表示没走打包，是直接 npm start 跑起来的开发态。
+  try {
+    const h = await (await fetch('/api/health')).json();
+    $('howVer').textContent = `版本 ${h.version} · build ${h.build} · 实例 ${h.instanceId}`;
+  } catch {
+    $('howVer').textContent = '版本读不到，服务可能刚起来';
+  }
+  $('howCmd').textContent =
+`# 发消息（@ 到的名字会进对方收件箱）
+node src/cli.mjs post ${state.project} "@codex 这条缓存策略你那边怎么看" --as workbuddy --type ask
+
+# 读自己没读过的（读完自动推进游标）
+node src/cli.mjs read ${state.project} --as codex
+
+# 跨项目找所有 @ 到自己的
+node src/cli.mjs inbox --as codex
+
+# 谁接入过、最后什么时候
+node src/cli.mjs who
+
+# 不想用命令行，直接打接口
+curl -X POST ${base}/api/post -H "content-type: application/json" \\
+  -d "{\\"project\\":\\"${state.project}\\",\\"from\\":\\"codex\\",\\"body\\":\\"收到\\"}"`;
+  $('howDlg').showModal();
+});
+
+$('btnCloseHow').addEventListener('click', () => $('howDlg').close());
+$('btnCopyCmd').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('howCmd').textContent);
+    $('btnCopyCmd').textContent = '已复制';
+    setTimeout(() => { $('btnCopyCmd').textContent = '复制命令'; }, 1200);
+  } catch {
+    alert('复制不了，手动选吧');
+  }
+});
+
+// ---------------- 统一设置与外观 ----------------
+const DEFAULT_APPEARANCE = {
+  mode: 'system', accent: '#2563EB', background: '#0D0F13', foreground: '#E6E8EB', font: 'system',
+};
+let savedSettings = { available: false, closeAction: 'ask', appearance: { ...DEFAULT_APPEARANCE } };
+let appearanceDraft = { ...DEFAULT_APPEARANCE };
+let currentSettingsPage = 'identity';
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+
+function applyAppearance(appearance) {
+  const result = appearanceToCss(appearance, { systemDark: systemTheme.matches });
+  const root = document.documentElement;
+  root.dataset.theme = result.theme;
+  for (const [name, value] of Object.entries(result.vars)) root.style.setProperty(name, value);
+  root.style.setProperty('--ui-font', result.fontFamily);
+}
+
+function updateAppearanceHint() {
+  const ratio = contrastRatio(appearanceDraft.background, appearanceDraft.foreground);
+  const hint = $('appearanceHint');
+  const bad = appearanceDraft.mode === 'custom' && ratio < 4.5;
+  hint.className = 'settingsHint ' + (bad ? 'bad' : '');
+  hint.textContent = appearanceDraft.mode === 'custom'
+    ? `文字对比度 ${ratio.toFixed(2)}:1${bad ? '，至少需要 4.5:1' : '，可以保存'}`
+    : '高级配色只在自定义模式使用。';
+  $('btnSaveAppearance').disabled = bad || !savedSettings.available;
+}
+
+function syncAppearanceForm() {
+  document.querySelectorAll('.modeCard').forEach((b) => b.classList.toggle('active', b.dataset.mode === appearanceDraft.mode));
+  document.querySelectorAll('.swatch').forEach((b) => b.classList.toggle('active', b.dataset.accent === appearanceDraft.accent));
+  $('appearanceFont').value = appearanceDraft.font;
+  for (const [id, key] of [
+    ['appearanceAccent', 'accent'], ['appearanceBackground', 'background'], ['appearanceForeground', 'foreground'],
+  ]) {
+    $(id).value = appearanceDraft[key];
+    $(id + 'Hex').textContent = appearanceDraft[key];
+  }
+  if (appearanceDraft.mode === 'custom') $('appearanceAdvanced').open = true;
+  updateAppearanceHint();
+}
+
+function beginCustomAppearance() {
+  if (appearanceDraft.mode === 'custom') return;
+  const style = getComputedStyle(document.documentElement);
+  appearanceDraft = {
+    ...appearanceDraft,
+    mode: 'custom',
+    accent: style.getPropertyValue('--accent').trim().toUpperCase() || appearanceDraft.accent,
+    background: style.getPropertyValue('--bg').trim().toUpperCase() || appearanceDraft.background,
+    foreground: style.getPropertyValue('--text').trim().toUpperCase() || appearanceDraft.foreground,
+  };
+}
+
+async function loadAppSettings() {
+  try {
+    const r = await fetch('/api/app-settings');
+    const d = await r.json();
+    savedSettings = {
+      available: !!d.available,
+      closeAction: d.closeAction || 'ask',
+      appearance: { ...DEFAULT_APPEARANCE, ...(d.appearance || {}) },
+    };
+  } catch {
+    savedSettings = { available: false, closeAction: 'ask', appearance: { ...DEFAULT_APPEARANCE } };
+  }
+  appearanceDraft = { ...savedSettings.appearance };
+  applyAppearance(savedSettings.appearance);
+  $('closeAction').value = savedSettings.closeAction;
+  $('closeAction').disabled = !savedSettings.available;
+  $('behaviorHint').textContent = savedSettings.available ? '修改后立即保存。' : '当前不是桌面应用，无法保存窗口行为。';
+  syncAppearanceForm();
+  return savedSettings;
+}
+
+async function saveAppSettings(patch) {
+  const r = await fetch('/api/app-settings', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || '保存失败');
+  savedSettings = { available: true, closeAction: d.closeAction, appearance: { ...d.appearance } };
+  return savedSettings;
+}
+
+function showSettingsPage(page) {
+  if (currentSettingsPage === 'appearance' && page !== 'appearance') {
+    appearanceDraft = { ...savedSettings.appearance };
+    applyAppearance(savedSettings.appearance);
+    syncAppearanceForm();
+  }
+  currentSettingsPage = page;
+  document.querySelectorAll('[data-settings-page]').forEach((b) => b.classList.toggle('active', b.dataset.settingsPage === page));
+  document.querySelectorAll('.settingsPage').forEach((p) => p.classList.toggle('active', p.dataset.page === page));
+  if (page === 'update') fetchUpdate(false);
+}
+
+async function openSettings(page = 'identity') {
+  await loadAppSettings();
+  await checkIdentity(true);
+  showSettingsPage(page);
+  if (!$('settingsDlg').open) $('settingsDlg').showModal();
+}
+
+function closeSettings() {
+  appearanceDraft = { ...savedSettings.appearance };
+  applyAppearance(savedSettings.appearance);
+  syncAppearanceForm();
+  $('settingsDlg').close();
+}
+
+$('btnSettings').addEventListener('click', () => openSettings('identity'));
+$('btnSettingsClose').addEventListener('click', closeSettings);
+$('settingsDlg').addEventListener('cancel', (e) => { e.preventDefault(); closeSettings(); });
+document.querySelectorAll('[data-settings-page]').forEach((b) => b.addEventListener('click', () => showSettingsPage(b.dataset.settingsPage)));
+
+document.querySelectorAll('.modeCard').forEach((b) => b.addEventListener('click', () => {
+  appearanceDraft.mode = b.dataset.mode;
+  applyAppearance(appearanceDraft);
+  syncAppearanceForm();
+}));
+document.querySelectorAll('.swatch').forEach((b) => b.addEventListener('click', () => {
+  appearanceDraft.accent = b.dataset.accent;
+  applyAppearance(appearanceDraft);
+  syncAppearanceForm();
+}));
+$('appearanceFont').addEventListener('change', () => {
+  appearanceDraft.font = $('appearanceFont').value;
+  applyAppearance(appearanceDraft);
+  syncAppearanceForm();
+});
+for (const [id, key] of [
+  ['appearanceAccent', 'accent'], ['appearanceBackground', 'background'], ['appearanceForeground', 'foreground'],
+]) {
+  $(id).addEventListener('input', () => {
+    beginCustomAppearance();
+    appearanceDraft[key] = $(id).value.toUpperCase();
+    applyAppearance(appearanceDraft);
+    syncAppearanceForm();
+  });
+}
+
+$('btnSaveAppearance').addEventListener('click', async () => {
+  const hint = $('appearanceHint');
+  try {
+    await saveAppSettings({ appearance: appearanceDraft });
+    appearanceDraft = { ...savedSettings.appearance };
+    applyAppearance(savedSettings.appearance);
+    syncAppearanceForm();
+    hint.className = 'settingsHint ok';
+    hint.textContent = '外观已保存。';
+  } catch (e) {
+    hint.className = 'settingsHint bad';
+    hint.textContent = e.message;
+  }
+});
+
+$('btnResetAppearance').addEventListener('click', async () => {
+  const hint = $('appearanceHint');
+  try {
+    await saveAppSettings({ appearance: DEFAULT_APPEARANCE });
+    appearanceDraft = { ...savedSettings.appearance };
+    applyAppearance(savedSettings.appearance);
+    syncAppearanceForm();
+    hint.className = 'settingsHint ok';
+    hint.textContent = '已恢复默认外观。';
+  } catch (e) {
+    hint.className = 'settingsHint bad';
+    hint.textContent = e.message;
+  }
+});
+
+$('closeAction').addEventListener('change', async () => {
+  const hint = $('behaviorHint');
+  const old = savedSettings.closeAction;
+  try {
+    await saveAppSettings({ closeAction: $('closeAction').value });
+    hint.className = 'settingsHint ok';
+    hint.textContent = '关闭行为已保存。';
+  } catch (e) {
+    $('closeAction').value = old;
+    hint.className = 'settingsHint bad';
+    hint.textContent = e.message;
+  }
+});
+
+systemTheme.addEventListener('change', () => {
+  if (savedSettings.appearance.mode === 'system' && appearanceDraft.mode === 'system') applyAppearance(appearanceDraft);
+});
+
+// ---------------- 更新 ----------------
+// 状态全在主进程里，这里只负责读和触发。检查、下载、安装都是 HTTP 请求，
+// 跟发消息一个路子，不用额外开 IPC 通道。
+let upd = null;
+
+function renderUpdate() {
+  const s = upd || {};
+  $('settingsBadge').hidden = !s.remote;
+
+  const bCheck = $('btnUpdCheck');
+  const bDown = $('btnUpdDownload');
+  const bInst = $('btnUpdInstall');
+  const barWrap = $('updBarWrap');
+  const notes = $('updNotes');
+
+  bDown.hidden = true;
+  bInst.hidden = true;
+  barWrap.hidden = true;
+  notes.hidden = true;
+
+  if (s.remote) {
+    const r = s.remote;
+    $('updTitle').textContent = r.kind === 'rebuilt'
+      ? `有同版本修复包 build ${r.build}`
+      : `有新版本 ${r.version} build ${r.build}`;
+    $('updMsg').textContent =
+      `当前 ${s.localVersion} build ${s.localBuild}，清单里是 ${r.version} build ${r.build}。`;
+    if (r.notes) {
+      notes.textContent = r.notes;
+      notes.hidden = false;
+    }
+
+    if (s.portable) {
+      $('updMsg').textContent += ' 便携版没法原地替换，点下面去下新包手动换。';
+      if (r.downloadUrl) {
+        bDown.hidden = false;
+        bDown.textContent = '去下载';
+      }
+    } else if (s.phase === 'downloading') {
+      barWrap.hidden = false;
+      $('updBar').style.width = (s.percent || 0) + '%';
+      $('updMsg').textContent = `正在下载 ${s.percent || 0}%`;
+    } else if (s.phase === 'ready') {
+      bInst.hidden = false;
+      bInst.textContent = s.green ? '覆盖并重启' : '装好并重启';
+    } else if (r.downloadUrl || r.zipUrl) {
+      bDown.hidden = false;
+      bDown.textContent = '下载';
+    }
+  } else {
+    $('updTitle').textContent = '检查更新';
+    $('updMsg').textContent = s.message || '还没查过';
+  }
+
+  bCheck.disabled = s.phase === 'checking' || s.phase === 'downloading';
+}
+
+async function fetchUpdate(check) {
+  try {
+    const r = await fetch('/api/update' + (check ? '?check=1' : ''));
+    upd = await r.json();
+  } catch {
+    upd = { phase: 'error', message: '连不上服务' };
+  }
+  renderUpdate();
+  return upd;
+}
+
+$('btnUpdCheck').addEventListener('click', () => fetchUpdate(true));
+
+$('btnUpdDownload').addEventListener('click', () => {
+  // 便携版只给链接，交给浏览器下
+  if (upd?.portable) {
+    if (upd.remote?.downloadUrl) window.open(upd.remote.downloadUrl);
+    return;
+  }
+  // 故意不 await：下载要几十秒，等它返回就没法看进度了，让轮询去读
+  fetch('/api/update/download', { method: 'POST' })
+    .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+    .then(({ ok, j }) => {
+      if (!ok) throw new Error(j.error || '下载失败');
+      upd = j.state || j;
+      renderUpdate();
+    })
+    .catch((e) => {
+      upd = { ...(upd || {}), phase: 'error', message: e.message };
+      renderUpdate();
+    });
+});
+
+$('btnUpdInstall').addEventListener('click', async () => {
+  const what = upd?.green ? '会解压覆盖当前文件夹' : '会装到安装目录';
+  if (!confirm(`${what}，装完自动打开新版。继续吗？`)) return;
+  try {
+    const r = await fetch('/api/update/install', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '安装没起来');
+    $('updMsg').textContent = '正在重启安装，窗口马上会关掉';
+  } catch (e) {
+    $('updMsg').textContent = '安装没起来：' + e.message;
+  }
+});
+
+// 下载中每 600 毫秒读一次进度；其余时候半分钟读一次状态，
+// 接住主进程启动时那次安静检查的结果。
+setInterval(() => {
+  if (upd?.phase === 'downloading') fetchUpdate(false);
+}, 600);
+setInterval(() => {
+  if (upd?.phase !== 'downloading') fetchUpdate(false);
+}, 30000);
+
+// 服务端给默认名字。本地存过的优先，没有才用它。
+// 必须在 checkIdentity 之前跑，否则第一次打开会先拿空名字去查身份。
+async function loadDefaultName() {
+  try {
+    const h = await (await fetch('/api/health')).json();
+    if (typeof h.defaultName === 'string' && h.defaultName.trim()) {
+      defaultName = h.defaultName.trim();
+    }
+  } catch {
+    // 拉不到就用 agent，不阻塞启动
+  }
+  if (!meInput.value.trim()) {
+    meInput.value = defaultName;
+    $('meDisplayName').textContent = defaultName;
+  }
+}
+
+// ---- 第一次打开先取名字 ----
+//
+// 名字发出第一条消息就锁死，历史消息的作者不会跟着改。所以第一次就得让人自己定，
+// 而不是悄悄拿系统用户名顶上，等发现不对已经晚了。
+//
+// 必须在 checkIdentity 之前跑：checkIdentity 会真的在服务端建一条成员记录，
+// 先绑上默认名字再让人改，会留下一个没说过话的空成员。
+const NAME_OK = /^[A-Za-z0-9_-]{1,64}$/;
+const NAME_RESERVED = new Set(['all', 'everyone', 'here', '全体成员']);
+
+// 跟服务端 isValidName 和 NAME_RESERVED 对齐。前端先挡一遍是为了即时反馈，
+// 真正的判定还在服务端，这里漏了也只是多一次请求。
+function nameProblem(v) {
+  if (!v) return '得有个名字';
+  if (!NAME_OK.test(v)) return '只能用字母、数字、下划线、连字符，1 到 64 个字符，别用中文';
+  if (NAME_RESERVED.has(v.toLowerCase())) return '这个是保留字，换一个';
+  return '';
+}
+
+function askFirstName() {
+  return new Promise((resolve) => {
+    const dlg = $('firstDlg');
+    const input = $('firstName');
+    const hint = $('firstHint');
+    // 配置里的默认名字本身也可能是坏值，兜一下，别让预填内容就不合法
+    const suggestion = nameProblem(defaultName) ? 'agent' : defaultName;
+    input.value = suggestion;
+    hint.textContent = '';
+    let done = false;
+
+    const finish = (name) => {
+      if (done) return;
+      done = true;
+      dlg.close();
+      meInput.value = name;
+      localStorage.setItem('chat.me', name);
+      $('meDisplayName').textContent = name;
+      resolve(name);
+    };
+
+    const confirm = () => {
+      const v = input.value.trim();
+      const bad = nameProblem(v);
+      if (bad) { hint.textContent = bad; input.focus(); return; }
+      finish(v);
+    };
+
+    $('btnFirstOk').onclick = confirm;
+    $('btnFirstSkip').onclick = () => finish(suggestion);
+    input.oninput = () => { hint.textContent = ''; };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); confirm(); }
+      // Esc 当作「用默认名字」。不给「什么都没选」这个状态，
+      // 否则关掉窗口再打开又得弹一次。
+      if (e.key === 'Escape') { e.preventDefault(); finish(suggestion); }
+    };
+    // 别的方式关掉（比如 Alt+F4 走的 cancel）也按默认名字处理
+    dlg.oncancel = (e) => { e.preventDefault(); finish(suggestion); };
+
+    dlg.showModal();
+    input.focus();
+    input.select();
+  });
+}
+
+(async () => {
+  await loadDefaultName();
+  await loadAppSettings();
+  const projects = await loadProjects();
+  // 是不是第一次用。判据是服务端一个成员都没有，且本地没存过名字。
+  // 不拿 localStorage 单打独斗，它按 origin 分，端口一变就空，
+  // 只看它的话换个端口就会再弹一次。
+  if (state.online && !Object.keys(state.agents).length && !localStorage.getItem('chat.me')) {
+    await askFirstName();
+  }
+  const names = projects.map((p) => p.name);
+  if (names.length && !names.includes(state.project)) state.project = names[0];
+  await loadMessages(state.project);
+  await loadProjects();
+  await loadMembers();
+  await checkIdentity(true);
+  $('msgBody').focus();
+})();
+
+// ---- 新建频道 ----
+//
+// 频道光有名字看不出是干什么的，所以建的时候可以绑一个 AGENTS 下的项目。
+// 项目清单从 /api/agents-projects 拿，工作区和当前状态来自 AGENTS\INDEX.md。
+let agentProjects = null;
+// 服务端实际扫的是哪个根目录。列表空的时候要靠它说清楚扫错了地方。
+let agentRoot = '';
+
+async function loadAgentProjects() {
+  // 每次都重新拉，不缓存。
+  //
+  // AGENTS 目录随时可能多一个项目夹，或者 INDEX.md 改了状态。缓存住的话
+  // 就得刷新整个页面才看得见，而人往往是在「想绑一个新项目」的时候才发现
+  // 列表里没有它。这个接口只是读几个目录名，代价很小，没必要省。
+  try {
+    const d = await (await fetch('/api/agents-projects')).json();
+    agentProjects = d.projects || [];
+    agentRoot = d.root || agentRoot;
+  } catch {
+    // 拉失败就留着上一份，别把列表清空。网络抖一下就变空更让人懵。
+    agentProjects = agentProjects || [];
+  }
+  return agentProjects;
+}
+
+// 总结情况。只有 lumedit 用了 PROJECT-SUMMARY.md 这个统一文件名，别的项目
+// 叫「说明书01-xxx.md」之类，所以不能拿有没有那份当「有没有写总结」。
+function summaryTag(p) {
+  if (p.hasSummary) return '';
+  const n = p.summaryCount || 0;
+  return n ? `（${n} 份）` : '（没写总结）';
+}
+
+function fillDirOptions() {
+  const sel = $('newDir');
+  sel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = (agentProjects || []).length
+    ? '不绑（光有名字，不知道干什么的）'
+    : '没有可绑的项目（见下方说明）';
+  sel.appendChild(none);
+  for (const p of agentProjects || []) {
+    const o = document.createElement('option');
+    o.value = p.name;
+    o.textContent = p.name + summaryTag(p);
+    sel.appendChild(o);
+  }
+}
+
+function renderDirInfo() {
+  const list = agentProjects || [];
+  if (!list.length) {
+    // 空的时候必须说清楚为什么空，否则人只会以为这个功能坏了。
+    // 把实际扫的根目录也打出来，多半是扫到程序自己的 data/ 去了。
+    const where = agentRoot ? `现在扫的是 ${agentRoot}，` : '';
+    $('newDirInfo').textContent = where
+      + '里面没有可绑的项目。项目根目录下一个子目录算一个项目。'
+      + '要换根目录就在 agentchat.local.json 里写 {"agentsDir": "D:/work"}，'
+      + '或者设环境变量 AGENT_CHAT_AGENTS_DIR。';
+    return;
+  }
+  const name = $('newDir').value;
+  const p = list.find((x) => x.name === name);
+  if (!p) { $('newDirInfo').textContent = ''; return; }
+  const bits = [];
+  if (p.workspace) bits.push(p.workspace);
+  if (p.status) bits.push(p.status);
+  // 总结说清楚是哪一种，别让人以为没写
+  if (p.hasSummary) bits.push('有 PROJECT-SUMMARY.md');
+  else if (p.summaryCount) bits.push(`总结 ${p.summaryCount} 份，还没统一成 PROJECT-SUMMARY.md`);
+  else bits.push('总结目录是空的');
+  $('newDirInfo').textContent = bits.join(' · ') || p.dir;
+}
+
+$('btnNewProj').addEventListener('click', async () => {
+  $('newName').value = '';
+  $('newNote').value = '';
+  $('newHint').textContent = '';
+  $('newDirInfo').textContent = '';
+  $('newDlg').showModal();
+  setTimeout(() => $('newName').focus(), 30);
+  await loadAgentProjects();
+  fillDirOptions();
+  $('newDir').value = '';
+  // 打开就把说明画一次。列表空的时候这里要给出为什么空、怎么配，
+  // 不然只留一个空下拉框，人会以为功能坏了。
+  renderDirInfo();
+});
+
+// 选了项目就顺手把频道名填上，省得再想一遍
+$('newDir').addEventListener('change', () => {
+  const v = $('newDir').value;
+  if (v && !$('newName').value.trim()) $('newName').value = v;
+  renderDirInfo();
+});
+
+$('btnNewCancel').addEventListener('click', () => $('newDlg').close());
+$('btnNewOk').addEventListener('click', async () => {
+  const name = $('newName').value.trim();
+  if (!name) { $('newHint').textContent = '得有个名字'; return; }
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) {
+    $('newHint').textContent = '只能用字母、数字、下划线、连字符，别用中文';
+    return;
+  }
+  const r = await fetch('/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      by: meInput.value.trim(),
+      dir: $('newDir').value || null,
+      note: $('newNote').value.trim(),
+    }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { $('newHint').textContent = d.error || '建不了'; return; }
+  $('newDlg').close();
+  await switchProject(name);
+});
+$('newName').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('btnNewOk').click();
+});
+
+// ---- 右键频道：改名 / 删除 ----
+//
+// 频道名散在消息文件、成员关系、游标三处，改名和删除都由服务端一次改完，
+// 界面只负责发起和刷新。general 是主频道，两件事都不给做。
+
+let ctxTarget = null;
+
+function closeCtx() {
+  const m = $('ctxMenu');
+  m.hidden = true;
+  m.innerHTML = '';
+  ctxTarget = null;
+}
+
+function ctxItem(text, cls, fn) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  if (cls) b.className = cls;
+  // 先把目标存下来，closeCtx 会把它清掉
+  b.onclick = () => { const t = ctxTarget; closeCtx(); fn(t); };
+  return b;
+}
+
+function openCtx(p, x, y) {
+  const m = $('ctxMenu');
+  m.innerHTML = '';
+  ctxTarget = p;
+
+  if (p.name === 'general') {
+    const tip = document.createElement('button');
+    tip.textContent = 'general 是主频道，改不了也删不了';
+    tip.disabled = true;
+    tip.style.opacity = '.6';
+    tip.style.cursor = 'default';
+    m.appendChild(tip);
+  } else {
+    m.appendChild(ctxItem('改频道名', '', openRename));
+    const sep = document.createElement('div');
+    sep.className = 'sep';
+    m.appendChild(sep);
+    m.appendChild(ctxItem('删除频道', 'danger', openDelete));
+  }
+
+  // 先显示再量尺寸，靠近右边缘或下边缘时往回收，别让菜单跑出窗口
+  placeCtx(x, y);
+}
+
+function placeCtx(x, y) {
+  const m = $('ctxMenu');
+  m.hidden = false;
+  m.style.left = '0px';
+  m.style.top = '0px';
+  const r = m.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - r.width - 8);
+  const top = Math.min(y, window.innerHeight - r.height - 8);
+  m.style.left = Math.max(8, left) + 'px';
+  m.style.top = Math.max(8, top) + 'px';
+}
+
+// ---- 右键消息：引用回复 / 复制 ----
+//
+// 回复走的是服务端本来就有的一套：post 带 replyTo，服务端会解析原消息，
+// 原文作者没被 @ 到就自动补一个 @，保证他真的收到。
+// 所以这里除了带 replyTo，还在输入框里把 @名字 填好，让人一眼看见在回谁。
+function openMsgCtx(m, x, y) {
+  const menu = $('ctxMenu');
+  menu.innerHTML = '';
+  ctxTarget = m;
+  menu.appendChild(ctxItem('引用回复', '', startReply));
+  const sep = document.createElement('div');
+  sep.className = 'sep';
+  menu.appendChild(sep);
+  menu.appendChild(ctxItem('复制正文', '', (msg) => copyText(msg.body)));
+  menu.appendChild(ctxItem('复制消息 ID', '', (msg) => copyText(msg.id)));
+  placeCtx(x, y);
+}
+
+function copyText(text) {
+  const done = () => toast('已复制');
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text) && done());
+    return;
+  }
+  if (fallbackCopy(text)) done();
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  ta.remove();
+  return ok;
+}
+
+function startReply(m) {
+  state.replyTo = m;
+  const box = $('msgBody');
+  const me = meInput.value.trim();
+  const tag = '@' + m.from;
+  // 回自己不用 @，回别人且还没 @ 过才补，免得手打过的重复一遍
+  if (m.from !== me && !box.value.includes(tag)) {
+    box.value = tag + ' ' + box.value;
+  }
+  renderReplyBar();
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
+function cancelReply() {
+  state.replyTo = null;
+  renderReplyBar();
+}
+
+function renderReplyBar() {
+  const bar = $('replyBar');
+  const m = state.replyTo;
+  if (!m) { bar.hidden = true; $('replyText').textContent = ''; return; }
+  const oneLine = String(m.body || '').replace(/\s+/g, ' ').slice(0, 60);
+  $('replyText').textContent = `回复 ${m.from}：${oneLine}`;
+  bar.hidden = false;
+}
+
+// 点别处、按 Esc、窗口失焦都收起来
+document.addEventListener('click', (e) => {
+  if (!$('ctxMenu').hidden && !e.target.closest('#ctxMenu')) closeCtx();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtx(); });
+window.addEventListener('blur', closeCtx);
+$('ctxMenu').addEventListener('contextmenu', (e) => e.preventDefault());
+
+function openRename(p) {
+  state.renFrom = p.name;
+  $('renName').value = p.name;
+  $('renMsg').textContent = '';
+  $('renDlg').showModal();
+  setTimeout(() => { $('renName').focus(); $('renName').select(); }, 30);
+}
+
+function openDelete(p) {
+  state.delName = p.name;
+  $('delMsg').textContent = `删掉频道 ${p.name}？里面有 ${p.count} 条消息。`;
+  $('delDlg').showModal();
+}
+
+$('btnRenCancel').addEventListener('click', () => $('renDlg').close());
+$('btnRenOk').addEventListener('click', async () => {
+  const from = state.renFrom;
+  const to = $('renName').value.trim();
+  if (!to) { $('renMsg').textContent = '得有个名字'; return; }
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(to)) {
+    $('renMsg').textContent = '只能用字母、数字、下划线、连字符';
+    return;
+  }
+  if (to === from) { $('renDlg').close(); return; }
+  const r = await fetch('/api/rename-project', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to, by: meInput.value.trim() }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { $('renMsg').textContent = d.error || '改不了'; return; }
+  $('renDlg').close();
+  // 正在看的就是这个频道，跟着换过去，不然消息流还挂在旧名字上
+  if (state.project === from) {
+    state.project = to;
+    localStorage.setItem('chat.project', to);
+    await loadMessages(to);
+  }
+  await loadProjects();
+  await loadMembers();
+  toast(`频道改名为 ${to}`);
+});
+$('renName').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('btnRenOk').click();
+});
+
+$('btnDelCancel').addEventListener('click', () => $('delDlg').close());
+$('btnDelOk').addEventListener('click', async () => {
+  const name = state.delName;
+  const r = await fetch('/api/delete-project', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ project: name, by: meInput.value.trim() }),
+  });
+  const d = await r.json().catch(() => ({}));
+  $('delDlg').close();
+  if (!r.ok) { toast(d.error || '删不了'); return; }
+  delete state.unread[name];
+  delete state.mentionUnread[name];
+  // 删的就是当前频道，回主频道，不然界面停在一个已经不存在的频道上
+  if (state.project === name) await switchProject('general');
+  else { await loadProjects(); await loadMembers(); }
+  toast(`频道 ${name} 删了，${d.count} 条消息挪到 _deleted 留底`);
+});
+
+// ---- 拉人 ----
+$('btnInviteClose').addEventListener('click', () => $('inviteDlg').close());
+
+// ---- 文件路径引用 ----
+//
+// 点路径做两件事：把路径复制到剪贴板（给 agent 用），再让系统默认程序打开（给人看）。
+// 打开这一步交给主进程的 setWindowOpenHandler，浏览器里点了没反应是正常的。
+let toastTimer = 0;
+function toast(msg) {
+  let el = $('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('on'), 1800);
+}
+
+$('stream').addEventListener('click', async (e) => {
+  const a = e.target.closest && e.target.closest('a.fref');
+  if (!a) return;
+  const p = a.dataset.path || '';
+  // navigator.clipboard 在没给权限的上下文里会直接拒绝，Electron 里也未必放行，
+  // 所以留一条 execCommand 的老路兜底。两条都不成就把路径打到提示里，人能自己抄。
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(p);
+    copied = true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = p;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      copied = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch {}
+  }
+  toast(copied ? '路径已复制：' + p : '路径：' + p);
+  // 不阻止默认行为，Electron 里会走 setWindowOpenHandler 用默认程序打开
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.exe binary
+*.zip binary
+
+# 通知脚本带 BOM，别让 git 动它的换行。
+src/notify-desktop.ps1 text eol=crlf

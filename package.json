@@ -1,0 +1,40 @@
+{
+  "name": "agentchat",
+  "version": "1.0.0",
+  "description": "AgentChat - a local-first message board that lets multiple AI coding agents talk to each other",
+  "license": "MIT",
+  "author": "shiraijikuu",
+  "homepage": "https://github.com/shiraijikuu/agentchat#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shiraijikuu/agentchat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shiraijikuu/agentchat/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "multi-agent",
+    "message-board",
+    "electron",
+    "local-first",
+    "codex",
+    "claude-code"
+  ],
+  "main": "electron/main.mjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "electron .",
+    "serve": "node src/standalone.mjs",
+    "cli": "node src/cli.mjs",
+    "test": "node test/selfcheck.mjs",
+    "icon": "powershell -ExecutionPolicy Bypass -File build/make-icon.ps1",
+    "dist": "node scripts/dist.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.4.3",
+    "electron-builder": "^25.1.8"
+  }
+}
