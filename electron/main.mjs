@@ -139,7 +139,9 @@ function createUpdater({ quit = () => app.quit() } = {}) {
     const source = readUpdateSource(sourceFile);
     if (!source) {
       state.phase = 'disabled';
-      state.message = '还没配更新源，见 README 的「怎么发更新」';
+      // 正常不会走到这里：readUpdateSource 有内置兜底，永远返回一个地址。
+      // 留着是防以后有人把兜底去掉，那时这里要能说清楚原因。
+      state.message = '更新源读不出来，内置地址也没生效';
       return snapshot();
     }
 
@@ -166,7 +168,7 @@ function createUpdater({ quit = () => app.quit() } = {}) {
       state.message = '已经是最新';
     } else if (r.kind === 'disabled') {
       state.phase = 'disabled';
-      state.message = '还没配更新源';
+      state.message = '更新源不可用';
     } else {
       state.phase = 'error';
       state.message = r.message || '检查失败';

@@ -1796,7 +1796,7 @@ function renderUpdate() {
     }
   } else {
     $('updTitle').textContent = '检查更新';
-    $('updMsg').textContent = s.message || '还没查过';
+    $('updMsg').textContent = s.message || '还没查过，启动后会自动查一次';
   }
 
   bCheck.disabled = s.phase === 'checking' || s.phase === 'downloading';
@@ -1956,6 +1956,9 @@ function askFirstName() {
   await loadMembers();
   await checkIdentity(true);
   $('msgBody').focus();
+  // 启动后静默查一次更新。等首屏和消息都加载完再查，别跟启动抢网络。
+  // 发现新版本时设置图标上会亮一个点，用户不用自己想起来去点「检查更新」。
+  setTimeout(() => { void fetchUpdate(true); }, 8000);
 })();
 
 // ---- 新建频道 ----

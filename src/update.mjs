@@ -4,11 +4,11 @@
 // electron-updater 看语义版本没变就认为没更新，接进来也是摆设。LumEdit 能双轨并行，
 // 是因为它两条路都留着；这边只留真正起作用的那条。
 //
-// 清单地址不写死。没有发布源的时候硬去查，只会每次检查都报错，界面上一直挂个红点。
-// 所以默认关闭，配了才查，来源按优先级：
+// 清单地址有内置默认值，装上就能查，不用先配一个 json 文件。想覆盖按优先级：
 //   1. 环境变量 AGENT_CHAT_UPDATE_URL，配套 AGENT_CHAT_UPDATE_PREFIX 限定下载域名
 //   2. userData/update-source.json，形如 {"url": "...", "downloadPrefix": "..."}
-// 两个都没有就返回 disabled，界面什么都不显示。
+//   3. 内置的 jsdelivr 镜像
+// 彻底关掉用 AGENT_CHAT_NO_UPDATE=1。
 //
 // 清单格式跟 LumEdit 保持一致，以后要挪过来直接能用：
 //   { "version": "1.0.0", "build": 2, "downloads": { "windows": "..." },
@@ -20,6 +20,15 @@ import crypto from 'node:crypto';
 
 const TIMEOUT_MS = 8000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
+// 走 jsdelivr 镜像而不是 raw.githubusercontent：后者在国内经常连不上，
+// 而自动检查更新失败是静默的，用户只会觉得「从来没提示过有新版本」。
+// 代价是 jsdelivr 对分支有缓存，发版后最长可能等十二小时才刷到新清单，
+// 实测一般几分钟。清单后面的 ?t= 只能绕开本地缓存，绕不开 CDN。
+const DEFAULT_UPDATE_URL = 'https://cdn.jsdelivr.net/gh/shiraijikuu/AgentChat@main/update.json';
+// 内置源只认自己仓库的 Release 附件。清单放在第三方 CDN 上没有签名，
+// 万一被改，至少不能让下载地址指到别处。
+const DEFAULT_DOWNLOAD_PREFIX = 'https://github.com/shiraijikuu/AgentChat/releases/';
 
 // 清单来自第三方 CDN，没有签名。下载地址只认这些前缀，其余一律丢掉，
 // 免得清单被改了指到别处让人下载安装包。
@@ -54,15 +63,18 @@ export function readUpdateSource(file) {
       origin: 'env',
     };
   }
-  if (!file) return null;
-  try {
-    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const url = String(j.url || '').trim();
-    if (!url) return null;
-    return { url, downloadPrefix: String(j.downloadPrefix || '').trim(), origin: file };
-  } catch {
-    return null;
+  if (file) {
+    try {
+      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const url = String(j.url || '').trim();
+      if (url) {
+        return { url, downloadPrefix: String(j.downloadPrefix || '').trim(), origin: file };
+      }
+    } catch {
+      // 文件不存在或者写坏了都走默认，不当成错误。用户可能压根没建过这个文件。
+    }
   }
+  return { url: DEFAULT_UPDATE_URL, downloadPrefix: DEFAULT_DOWNLOAD_PREFIX, origin: 'default' };
 }
 
 /**
