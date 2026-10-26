@@ -14,10 +14,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../src/server.mjs';
 import { Store } from '../src/store.mjs';
 import { discover, readRuntime } from '../src/lock.mjs';
+import { takeOverFromSourceServer } from '../electron/takeover.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(HERE, '.testdata');
@@ -475,6 +477,37 @@ async function main() {
   const ib4 = await fetch(api('/api/inbox?agent=ibagent&unread=1')).then((r) => r.json());
   ok('新来的一条又变成未读', ib4.count === 1 && String(ib4.messages[0].body).includes('第三条'));
 
+  // ---- 11b 收件箱分页 ----
+  // 未读比 limit 多的时候，以前是 slice(-N) 取最后 N 条，ack 一推游标，
+  // 前面那些就被永久跨过去了。这里盯住三点：从头取、total 报全量、翻页不跳号。
+  console.log('\n收件箱分页：超 limit 从头取，ack 之后接着往下');
+  const pgKey = crypto.randomBytes(24).toString('hex');
+  for (let i = 1; i <= 5; i += 1) {
+    await post({ project: 'ident', from: 'pgcaller', body: `@pgagent 第${i}条`, agentKey: pgKey });
+  }
+
+  const pg1 = await fetch(api('/api/inbox?agent=pgagent&unread=1&limit=2')).then((r) => r.json());
+  const pg1Bodies = pg1.messages.map((m) => String(m.body));
+  ok('第一页只给 limit 条', pg1.count === 2, `实际 ${pg1.count}`);
+  ok('total 报出全部未读', pg1.total === 5, `实际 ${pg1.total}`);
+  ok('第一页是最早那两条',
+    pg1Bodies.length === 2 && pg1Bodies[0].includes('第1条') && pg1Bodies[1].includes('第2条'),
+    JSON.stringify(pg1Bodies));
+
+  const ack1 = pg1.messages[pg1.messages.length - 1];
+  await fetch(api('/api/inbox/ack'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agent: 'pgagent', lastId: ack1.id, lastTs: ack1.ts }),
+  });
+
+  const pg2 = await fetch(api('/api/inbox?agent=pgagent&unread=1&limit=2')).then((r) => r.json());
+  const pg2Bodies = pg2.messages.map((m) => String(m.body));
+  ok('第二页接着往下，不跳号',
+    pg2Bodies.length === 2 && pg2Bodies[0].includes('第3条') && pg2Bodies[1].includes('第4条'),
+    JSON.stringify(pg2Bodies));
+  ok('剩余总数跟着减', pg2.total === 3, `实际 ${pg2.total}`);
+
   // ---- 12 @全体成员 和文件路径引用 ----
   console.log('\n@全体成员：展开成所有人；文件路径引用');
   const allKey = crypto.randomBytes(24).toString('hex');
@@ -545,6 +578,16 @@ async function main() {
 
   const rel = (await post({ project: 'ident', from: 'allcaller', body: '相对路径 src/store.mjs 不算', agentKey: allKey })).data.msg;
   ok('相对路径不当文件引用', Array.isArray(rel.files) && rel.files.length === 0);
+
+  // https:// 里的 s:// 长得跟盘符路径一模一样，盘符前不排除英文字母就会被收进来。
+  // 实测 https://302ai.cn/x 曾经在收件箱里显示成「文件 s://302ai.cn/x」。
+  const url = (await post({ project: 'ident', from: 'allcaller', body: '可以借鉴 https://302ai.cn/ 这个站', agentKey: allKey })).data.msg;
+  ok('URL 不当文件引用', Array.isArray(url.files) && url.files.length === 0, JSON.stringify(url.files));
+
+  const urlMixed = (await post({ project: 'ident', from: 'allcaller', body: 'https://302ai.cn/a 和 D:/work/f.mjs', agentKey: allKey })).data.msg;
+  ok('URL 和真路径混写只收路径',
+    urlMixed.files?.length === 1 && urlMixed.files[0].path === 'D:/work/f.mjs',
+    JSON.stringify(urlMixed.files?.map((f) => f.path)));
 
   const bare = (await post({ project: 'ident', from: 'allcaller', body: '@全体 单独写不算全体', agentKey: allKey })).data.msg;
   ok('@全体 不是合法收件人，最终按漏写规则回落全体',
@@ -1060,7 +1103,164 @@ async function main() {
     ok('相近颜色对比度低于 4.5', appearanceMod.contrastRatio('#777777', '#777778') < 4.5);
   }
 
+  // ---- 13b 更新检查：网络抖动要重试，报错要说清是网络还是清单 ----
+  console.log('\n更新检查：重试与报错');
+  {
+    const { checkForUpdate, candidateUrls } = await import('../src/update.mjs');
+    const src = { url: 'https://example.invalid/update.json' };
+    const okRes = { ok: true, status: 200, json: async () => ({ version: '1.0.0', build: 99 }) };
+    const netErr = () => { const e = new Error('fetch failed'); e.cause = { code: 'ECONNRESET' }; return e; };
+
+    // 前两次网络错误，第三次成功
+    let calls = 0;
+    const flaky = async () => { calls += 1; if (calls < 3) throw netErr(); return okRes; };
+    const r1 = await checkForUpdate({ localVersion: '1.0.0', localBuild: 22, source: src, fetchImpl: flaky });
+    ok('抖动两次后第三次成功', r1.kind === 'rebuilt' && calls === 3, `kind=${r1.kind} calls=${calls}`);
+
+    // 一直失败：报错要带地址和原因，并且说清试了几次
+    let calls2 = 0;
+    const dead = async () => { calls2 += 1; throw netErr(); };
+    const r2 = await checkForUpdate({ localVersion: '1.0.0', localBuild: 22, source: src, fetchImpl: dead });
+    ok('一直失败时报错带地址和原因',
+      r2.kind === 'error' && r2.message.includes('example.invalid') && r2.message.includes('ECONNRESET'), r2.message);
+    ok('一直失败时报错说清试了几次', /试了 3 次/.test(r2.message), r2.message);
+    ok('重试次数没有失控', calls2 === 3, `实际 ${calls2}`);
+
+    // 404 是地址问题，重试没意义
+    let calls3 = 0;
+    const notFound = async () => { calls3 += 1; return { ok: false, status: 404, json: async () => ({}) }; };
+    const r3 = await checkForUpdate({ localVersion: '1.0.0', localBuild: 22, source: src, fetchImpl: notFound });
+    ok('404 不重试', calls3 === 1 && r3.kind === 'error' && r3.message.includes('404'), `calls=${calls3} msg=${r3.message}`);
+
+    // 5xx 是服务端临时问题，要重试
+    let calls4 = 0;
+    const boom = async () => { calls4 += 1; return { ok: false, status: 503, json: async () => ({}) }; };
+    const r4 = await checkForUpdate({ localVersion: '1.0.0', localBuild: 22, source: src, fetchImpl: boom });
+    ok('503 会重试', calls4 === 3 && r4.kind === 'error', `calls=${calls4}`);
+
+    // 主入口一直被重置，换镜像
+    const seen = [];
+    const mirrorOk = async (u) => {
+      const host = new URL(u).hostname;
+      seen.push(host);
+      if (host === 'cdn.jsdelivr.net') throw netErr();
+      return okRes;
+    };
+    const r5 = await checkForUpdate({
+      localVersion: '1.0.0',
+      localBuild: 22,
+      source: { url: 'https://cdn.jsdelivr.net/gh/shiraijikuu/AgentChat@main/update.json' },
+      fetchImpl: mirrorOk,
+    });
+    ok('主入口不通时换镜像能成功', r5.kind === 'rebuilt', `kind=${r5.kind}`);
+    ok('换的是 fastly 入口', seen.includes('fastly.jsdelivr.net'), JSON.stringify([...new Set(seen)]));
+    ok('主入口试满 3 次才换', seen.filter((h) => h === 'cdn.jsdelivr.net').length === 3,
+      `实际 ${seen.filter((h) => h === 'cdn.jsdelivr.net').length}`);
+
+    ok('非 jsdelivr 源不展开镜像', candidateUrls('https://example.invalid/x.json').length === 1);
+    ok('jsdelivr 源展开成三个候选', candidateUrls('https://cdn.jsdelivr.net/gh/a/b@main/x.json').length === 3);
+  }
+
+  // ---- 14 桌面版接管源码态服务 ----
+  // 源码态服务占着端口时，桌面版直接复用它，结果更新能力没了、跑的还可能是旧代码。
+  // 这里起一个真的源码态服务，看接管逻辑会不会把它收掉。
+  console.log('\n桌面版启动：端口被源码态服务占着时要接管');
+  {
+    const tkDir = path.join(HERE, '.testdata-takeover');
+    const tkPort = PORT + 7;
+    rmrf(tkDir);
+    fs.mkdirSync(tkDir, { recursive: true });
+
+    const child = spawn(process.execPath, [path.join(HERE, '..', 'src', 'standalone.mjs')], {
+      env: { ...process.env, AGENT_CHAT_DIR: tkDir, AGENT_CHAT_PORT: String(tkPort) },
+      stdio: 'ignore',
+    });
+    child.unref();
+
+    const upDeadline = Date.now() + 15000;
+    let up = false;
+    while (Date.now() < upDeadline) {
+      try {
+        const r = await fetch(`http://${HOST}:${tkPort}/api/health`, { signal: AbortSignal.timeout(300) });
+        if (r.ok) { up = true; break; }
+      } catch { /* 还没起来 */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    ok('源码态服务起来了', up);
+
+    const rt = (() => { try { return JSON.parse(fs.readFileSync(path.join(tkDir, '_runtime.json'), 'utf8')); } catch { return null; } })();
+    ok('运行时记录写着 electron: false', rt && rt.electron === false, JSON.stringify(rt && { electron: rt.electron, pid: rt.pid }));
+
+    const aliveBefore = (() => { try { process.kill(rt.pid, 0); return true; } catch { return false; } })();
+    const verdict = await takeOverFromSourceServer({ dir: tkDir, port: tkPort });
+    const aliveAfter = (() => { try { process.kill(rt.pid, 0); return true; } catch { return false; } })();
+
+    ok('判定为接管', verdict === 'taken-over', `实际 ${verdict}`);
+    ok('源码态进程被停掉', aliveBefore && !aliveAfter);
+    const portFree = await (async () => {
+      try {
+        await fetch(`http://${HOST}:${tkPort}/api/health`, { signal: AbortSignal.timeout(300) });
+        return false;
+      } catch { return true; }
+    })();
+    ok('端口已释放，桌面版能自己起', portFree);
+
+    // 端口空了再调一次，不该再动手
+    ok('端口空了返回 none', (await takeOverFromSourceServer({ dir: tkDir, port: tkPort })) === 'none');
+
+    // 记录写着 electron: true 说明是另一个桌面版实例，只能复用，不能杀
+    fs.writeFileSync(path.join(tkDir, '_runtime.json'), JSON.stringify({ pid: process.pid, port: tkPort, electron: true }));
+    ok('另一个桌面版实例不动手', (await takeOverFromSourceServer({ dir: tkDir, port: tkPort })) === 'kept');
+
+    rmrf(tkDir);
+  }
+
   rmrf(DIR);
+
+  // ---- 文件引用解析：落盘契约与读时装饰 ----
+  // 这一组不依赖服务，纯函数。用例在 test/parse_files.test.mjs 里跑全量，
+  // 这里只挑几条最关键的塞进自检，保证「改了 store.mjs 忘了跑那个文件」也能被发现。
+  console.log('\n文件引用：落盘契约与读时装饰');
+  {
+    const { parseFileRefs, decorateFiles } = await import('../src/store.mjs');
+
+    const r1 = parseFileRefs('看 `E:\\a\\b.txt` 这个文件');
+    ok('显式分隔优先', r1.files.length === 1 && r1.files[0].path === 'E:\\a\\b.txt' && r1.candidates.length === 0);
+
+    const r2 = parseFileRefs('见 https://302ai.cn/x 这个');
+    ok('协议头不误收', r2.files.length === 0 && r2.candidates.length === 0);
+
+    const r3 = parseFileRefs('看 E:\\docs\\report最终版.txt 吧');
+    ok('CJK 边界出候选不进 files', r3.files.length === 0 && r3.candidates.length === 1
+      && r3.candidates[0].reason === 'cjk-ascii-boundary');
+
+    const r4 = parseFileRefs('先看 E:\\a\\b.mjs 再看 E:\\a\\b.mjs');
+    ok('重复引用合成一条并留两处区间', r4.files.length === 1 && r4.files[0].occurrences.length === 2);
+
+    const r5 = parseFileRefs('共享 \\\\server\\share\\a.txt');
+    ok('UNC 双反斜杠保住', r5.files.length === 1 && r5.files[0].path === '\\\\server\\share\\a.txt');
+
+    // 四条不变量
+    const v1 = decorateFiles({ body: 'x E:\\a\\b.txt' });
+    ok('v1 老记录标 derived 不算降级', v1.filesMeta.source === 'derived' && v1.filesMeta.degraded === false);
+    for (const bad of [null, false, 0, 3, '2', undefined]) {
+      const r = decorateFiles({ body: 'x E:\\a\\b.txt', filesVersion: bad, files: [] });
+      ok(`未知版本 ${JSON.stringify(bad)} 不回落 v1`,
+        r.files === null && r.fileCandidates === null && r.filesMeta.source === null
+        && r.filesMeta.degraded === false);
+    }
+    const v2 = decorateFiles({
+      body: 'x E:\\a\\b.txt', filesVersion: 2,
+      files: [{ path: 'E:\\a\\b.txt', line: null, lineEnd: null, raw: 'E:\\a\\b.txt', occurrences: [{ start: 2, end: 12, raw: 'E:\\a\\b.txt' }] }],
+    });
+    ok('v2 原样用不降级', v2.filesMeta.source === 'stored' && v2.filesMeta.degraded === false);
+    const v2bad = decorateFiles({
+      body: 'x E:\\a\\b.txt', filesVersion: 2,
+      files: [{ path: 'E:\\a\\b.txt', line: null, lineEnd: null, raw: 'E:\\zzz', occurrences: [{ start: 2, end: 12, raw: 'E:\\zzz' }] }],
+    });
+    ok('v2 区间对不上标 derived+degraded',
+      v2bad.filesMeta.source === 'derived' && v2bad.filesMeta.degraded === true);
+  }
 
   console.log(`\n通过 ${pass}，失败 ${fail}`);
   if (fail) {

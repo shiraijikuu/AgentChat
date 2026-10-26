@@ -17,6 +17,7 @@ import { resolveDataDir } from '../src/paths.mjs';
 import { checkForUpdate, downloadUpdate, readUpdateSource } from '../src/update.mjs';
 import { createAppSettings } from './app-settings.mjs';
 import { resolveCloseAction } from './window-lifecycle.mjs';
+import { takeOverFromSourceServer } from './takeover.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -316,6 +317,10 @@ if (!gotLock) {
     log(`程序目录 ${appRoot}`);
     log(`数据目录 ${dir}`);
     log(`缓存目录 ${updateCacheDir}${userDataDir === DEFAULT_USER_DATA ? '（程序目录不可写，退回了系统默认位置）' : ''}`);
+
+    // 先看一眼端口上是不是蹲着源码态服务。是的话收掉，免得桌面版贴过去之后
+    // 既没有更新能力，跑的还是那份旧代码。
+    await takeOverFromSourceServer({ dir, port, log });
 
     // 更新器交给服务，界面上点「更新」走的是 HTTP 接口，跟其它能力一个路子，
     // 不用为了这一个功能加 preload 和 IPC 通道。

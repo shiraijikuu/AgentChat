@@ -121,6 +121,16 @@ export async function startServer({ dir, port = 7788, host = '127.0.0.1', portSp
     const live = await discover(dir, host);
     if (live) {
       onLog(`已有实例在跑，直接复用 ${host}:${live.port}（pid ${live.pid}）`);
+      // 复用别人起的服务，本进程准备好的 updater、appSettings 一个都用不上，
+      // 能力以那个实例为准。最常见的踩法是源码态服务占着端口，桌面版贴上去，
+      // 界面上就显示「这个模式下没有更新能力」。这里至少要在日志里说清楚。
+      const liveBuild = Number(live.health?.build);
+      if (liveBuild !== Number(APP_BUILD)) {
+        onLog(`注意：复用实例是 build ${liveBuild}，本进程是 build ${APP_BUILD}，更新和桌面设置能力以那个实例为准`);
+      }
+      if (live.electron === false) {
+        onLog('注意：复用实例是源码态服务（不是桌面版），没有更新能力');
+      }
       return { port: live.port, host, instanceId: live.instanceId, reused: true, close: async () => {}, store: new Store(dir) };
     }
   }
@@ -288,13 +298,15 @@ export async function startServer({ dir, port = 7788, host = '127.0.0.1', portSp
         const agent = url.searchParams.get('agent');
         if (!agent) return sendJson(res, 400, { error: '要传 agent' });
         const unreadOnly = url.searchParams.get('unread') === '1';
-        const messages = store.inbox(agent, url.searchParams.get('limit'), { unreadOnly });
+        const { messages, total } = store.inbox(agent, url.searchParams.get('limit'), { unreadOnly });
         // 收件箱跨频道，所以把这次涉及到的频道说明一起带上
         const channels = {};
         for (const m of messages) {
           if (!channels[m.project]) channels[m.project] = store.channelOf(m.project);
         }
-        return sendJson(res, 200, { agent, unreadOnly, count: messages.length, channels, messages });
+        // count 是这一页几条，total 是符合条件的总数。两个不一样就说明还有没列出来的，
+        // 调用方接着再跑一次 inbox 就行，游标会把它往后推。
+        return sendJson(res, 200, { agent, unreadOnly, count: messages.length, total, channels, messages });
       }
 
       if (p === '/api/inbox/ack' && req.method === 'POST') {
@@ -447,7 +459,13 @@ export async function startServer({ dir, port = 7788, host = '127.0.0.1', portSp
 
       if (p === '/api/update' && req.method === 'GET') {
         if (!updater) {
-          return sendJson(res, 200, { phase: 'disabled', message: '这个模式下没有更新能力', packaged: false });
+          // build 0 是源码态（node src/standalone.mjs 或者 npm run serve），
+          // 没有 Electron 外壳，也就没有更新器。桌面版要是发现端口已经被这种
+          // 服务占着，会直接复用，同样会走到这里，所以文案得把这一点说出来。
+          const message = Number(APP_BUILD) === 0
+            ? '当前连的是源码态服务（build 0），更新能力只在桌面版里有。桌面版如果发现端口已被它占着会直接复用，也会看到这一条。'
+            : '这个模式下没有更新能力';
+          return sendJson(res, 200, { phase: 'disabled', message, packaged: false, localBuild: APP_BUILD });
         }
         // 带 check=1 才真去拉清单。不带就只读当前状态，界面轮询进度用这个。
         if (url.searchParams.get('check') === '1') {

@@ -12,7 +12,7 @@
 //
 // 配置长这样：
 // {
-//   "desktopNotify": ["doubao", "qoder", "workbuddy"],
+//   "desktopNotify": ["doubao", "qoder", "workbuddy", "dsh"],
 //   "dsh":   { "run": "codex resume --last", "cwd": "D:/work", "cooldownSec": 60 },
 //   "doubao": { "command": "node", "args": ["D:/tools/wake.mjs"], "cooldownSec": 120 }
 // }
@@ -21,6 +21,7 @@
 //
 // desktopNotify 是给「没有命令行、拉不起来」的 agent 用的：被 @ 的时候弹一条
 // Windows 通知，人看到就知道该去开哪个。写 true 表示全部名字都弹。
+// 能拉起来的 agent 也能写进来，代价是每条 @ 都弹一次，因为通知在冷却判断之前。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -238,8 +239,13 @@ export class Hooks {
       ts: msg.ts,
       mentions: msg.mentions || [],
       mentionsAll: !!msg.mentionsAll,
-      // 正文里提到的文件路径，被拉起的会话直接读这个数组，不用自己再解析一遍
+      // 正文里提到的文件路径，被拉起的会话直接读这个数组，不用自己再解析一遍。
+      // 只给已确认的 files；fileCandidates 是解析不确定的，不往这里放 ——
+      // 被拉起的会话拿到的应该是能直接 open 的路径，不是「两种可能」。
       files: Array.isArray(msg.files) ? msg.files : [],
+      fileCandidates: Array.isArray(msg.fileCandidates) ? msg.fileCandidates : [],
+      // 这条消息的 files 是怎么来的：stored（写入时算的）/ derived（读时补的）/ null（没法校验）
+      filesMeta: msg.filesMeta || null,
     };
     let payloadFile = null;
     try {
@@ -250,6 +256,8 @@ export class Hooks {
     }
 
     const files = Array.isArray(msg.files) ? msg.files : [];
+    const cands = Array.isArray(msg.fileCandidates) ? msg.fileCandidates : [];
+    const filesMeta = msg.filesMeta || null;
     const ch = channel || {};
     const env = {
       ...process.env,
@@ -261,10 +269,19 @@ export class Hooks {
       AGENT_CHAT_FROM: String(msg.from || ''),
       AGENT_CHAT_MSG_ID: String(msg.id || ''),
       AGENT_CHAT_PAYLOAD: payloadFile || '',
-      // 文件路径单独给一份，被拉起的脚本可以直接拿来用，不用读载荷
+      // 文件路径单独给一份，被拉起的脚本可以直接拿来用，不用读载荷。
+      // 只放已确认的；候选不进来，因为这里的用途是「直接 open」。
       AGENT_CHAT_FILES: files.map((f) => (f.line ? `${f.path}:${f.line}` : f.path)).join(';'),
+      // 有候选或者根本没法校验的时候给个非空标记，让被拉起的会话知道
+      // 「上面那份清单可能不全」，需要的话自己去读载荷里的 fileCandidates。
+      AGENT_CHAT_FILES_UNVERIFIED: (!Array.isArray(msg.files) || cands.length) ? '1' : '',
       AGENT_CHAT_MENTION_ALL: msg.mentionsAll ? '1' : '',
     };
+    // filesMeta.source 是 null 说明版本不认识，files 也一定是 null（成对不变量）。
+    if (filesMeta && filesMeta.source === null) {
+      env.AGENT_CHAT_FILES_UNVERIFIED = '1';
+      this._log(`${name} 载荷里 files 无法校验（${(filesMeta.reasons || []).join(';')}），已标 unverified`);
+    }
 
     const opts = {
       cwd: hook.cwd ? String(hook.cwd) : this.dir,

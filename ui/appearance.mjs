@@ -3,10 +3,12 @@ const HEX = /^#[0-9A-F]{6}$/;
 const LIGHT = {
   '--bg': '#F6F7F9', '--panel': '#FFFFFF', '--border': '#E3E5E9', '--soft': '#EEF0F4',
   '--text': '#1C1F24', '--muted': '#6B7280', '--bubble': '#FFFFFF',
+  '--scroll': '#C9CBD0', '--scroll-hover': '#A8ABB1',
 };
 const DARK = {
   '--bg': '#0D0F13', '--panel': '#14171D', '--border': '#262B34', '--soft': '#1B1F27',
   '--text': '#E6E8EB', '--muted': '#8B929E', '--bubble': '#1A1E26',
+  '--scroll': '#3A3F48', '--scroll-hover': '#565D69',
 };
 const FONTS = {
   system: '-apple-system, "Segoe UI", "Microsoft YaHei", sans-serif',
@@ -73,6 +75,9 @@ export function appearanceToCss(appearance = {}, { systemDark = false } = {}) {
       '--accent': accent,
       '--bubble': mix(background, foreground, dark ? 0.07 : 0.045),
       '--bubble-own': accent,
+      // 滚动条滑块。从背景往前景方向调一点，保证深色自定义主题下也看得见。
+      '--scroll': mix(background, foreground, dark ? 0.26 : 0.2),
+      '--scroll-hover': mix(background, foreground, dark ? 0.42 : 0.36),
     },
     fontFamily,
   };

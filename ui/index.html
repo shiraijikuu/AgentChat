@@ -12,6 +12,9 @@
   --bg: #f6f7f9; --panel: #ffffff; --border: #e3e5e9; --soft: #eef0f4;
   --text: #1c1f24; --muted: #6b7280; --accent: #2563eb;
   --bubble: #ffffff; --bubble-own: #2563eb; --ok: #16a34a; --bad: #dc2626;
+  /* 滚动条滑块。必须是实色，::-webkit-scrollbar-thumb 里不认 color-mix，
+     写进去整条声明会被丢掉，滑块就彻底不显示了。 */
+  --scroll: #c9cbd0; --scroll-hover: #a8abb1;
   --ui-font: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,17 +22,38 @@
     --bg: #0d0f13; --panel: #14171d; --border: #262b34; --soft: #1b1f27;
     --text: #e6e8eb; --muted: #8b929e; --accent: #5b8def;
     --bubble: #1a1e26; --bubble-own: #2b4b8f; --ok: #4ade80; --bad: #f87171;
+    --scroll: #3a3f48; --scroll-hover: #565d69;
   }
 }
 [data-theme="light"] {
   --bg: #f6f7f9; --panel: #ffffff; --border: #e3e5e9; --soft: #eef0f4;
   --text: #1c1f24; --muted: #6b7280; --bubble: #ffffff;
+  --scroll: #c9cbd0; --scroll-hover: #a8abb1;
 }
 [data-theme="dark"] {
   --bg: #0d0f13; --panel: #14171d; --border: #262b34; --soft: #1b1f27;
   --text: #e6e8eb; --muted: #8b929e; --bubble: #1a1e26;
+  --scroll: #3a3f48; --scroll-hover: #565d69;
 }
 * { box-sizing: border-box; }
+/* 滚动条。默认那套带上下箭头的灰条在浅色背景上很扎眼，换成细的圆角滑块。
+   10px 里留 3px 透明边，实际只看到 4px，不挤内容；悬停才加深一点。
+   颜色走 --scroll，四套主题各自有值，自定义主题由 appearanceToCss 现算，
+   所以换主题自动就跟上了。
+   两个坑记一下：一，这里不认 color-mix，写了整条声明会被丢掉，滑块直接不显示；
+   二，别写 scrollbar-width / scrollbar-color，Chromium 一看到就改用系统原生
+   滚动条，下面这套 ::-webkit-scrollbar 会被整段忽略。 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scroll);
+  border-radius: 999px; border: 3px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active {
+  background: var(--scroll-hover);
+  border: 3px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--text);
@@ -86,9 +110,9 @@ aside {
 .badge.on { display: inline-flex; }
 .badge.mention { background: #d97706; }
 
-.me { padding: 10px 12px; border-top: 1px solid var(--border); }
+.me { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 4px; }
 .settingsEntry {
-  width: 100%; display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 9px;
+  flex: 1; min-width: 0; display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 9px;
   padding: 8px; border: 1px solid transparent; border-radius: 10px; background: transparent;
   color: var(--text); text-align: left; cursor: pointer; font: inherit;
 }
@@ -109,7 +133,7 @@ aside {
 .idline.ok { color: var(--ok); }
 .idline.bad { color: var(--bad); }
 
-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+main { display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
 header {
   padding: 12px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 12px; background: var(--panel);
@@ -159,11 +183,92 @@ header button.hot { border-color: var(--accent); color: var(--accent); }
 .fref:hover { background: rgba(37,99,235,.1); }
 .msg.own .fref { color: #dbeafe; border-bottom-color: rgba(219,234,254,.6); }
 .msg.own .fref:hover { background: rgba(255,255,255,.18); }
+/* 解析不确定的路径引用：不做成链接，标「待确认」，虚线改成点线，颜色压暗。
+   把它做成可点链接等于替用户拍板，而这里恰恰是拍不了板的地方。 */
+.fref.cand {
+  color: var(--muted); border-bottom: 1px dotted currentColor; cursor: help;
+}
+.fref.cand:hover { background: transparent; }
+.msg.own .fref.cand { color: rgba(219,234,254,.75); }
+.candmark {
+  margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px;
+  background: rgba(217,119,6,.16); color: #b45309; font-weight: 500;
+  font-family: system-ui, sans-serif; letter-spacing: 0;
+}
+.msg.own .candmark { background: rgba(255,255,255,.22); color: #fff; }
+/* 文件引用的降级/待确认说明。灰字一行，不抢正文。 */
+.filesnote {
+  font-size: 11px; color: var(--muted); padding-left: 10px; margin-top: -2px;
+  line-height: 1.5;
+}
+/* 消息里的轻量标记。只认三种：围栏代码块、行内代码、加粗。
+   别的 markdown 一概不认，半套语法比不支持更绕人。
+   代码块里不解析路径也不认 @，见 bodyHtml 里的抽取顺序。
+   底色用 color-mix 从 --text 现算，自定义主题也跟着走，不用再加变量。 */
+.bubble strong { font-weight: 600; }
+.bubble code.inline {
+  font-family: ui-monospace, Consolas, monospace; font-size: .92em;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px;
+}
+.bubble pre.code {
+  margin: 6px 0; padding: 8px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  border: 1px solid var(--border);
+  overflow-x: auto; white-space: pre; word-break: normal; overflow-wrap: normal;
+  font-size: 12px; line-height: 1.5;
+}
+.bubble pre.code code { font-family: ui-monospace, Consolas, monospace; }
+.msg.own .bubble code.inline,
+.msg.own .bubble pre.code {
+  background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.28);
+}
 .quote {
   font-size: 11px; color: var(--muted); border-left: 2px solid var(--border);
   padding-left: 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .empty { color: var(--muted); text-align: center; margin-top: 48px; font-size: 13px; line-height: 2; }
+/* 进频道时标出上次看到哪儿，上面是旧的，下面开始是新消息 */
+.newDivider {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  color: var(--accent); font-size: 11px; padding: 2px 0;
+}
+.newDivider::before, .newDivider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+/* 没选频道时的空状态。学微信：右边整块留白，人自己去点左边。
+   顶部标题、消息流、输入框一起藏起来，不然会看到一条空的输入框悬在那儿。 */
+.welcome {
+  display: none; flex: 1; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; color: var(--muted); font-size: 13px;
+}
+.welcome .big { font-size: 46px; line-height: 1; opacity: .3; }
+main.no-channel > header,
+main.no-channel > .stream,
+main.no-channel > .composer,
+main.no-channel > .replyBar { display: none; }
+main.no-channel > .welcome { display: flex; }
+body.no-channel aside.people { display: none; }
+/* 右栏藏起来之后，网格第三列那 214px 还占着位置，中间这块就短了一截，
+   空状态整体看着偏左。没选频道时把第三列收掉，让 main 一直铺到窗口右边。 */
+body.no-channel .app { grid-template-columns: 236px 1fr; }
+
+/* 未读提示条。有没读的消息时浮在消息区顶部，点一下跳到第一条未读。
+   位置跟着 main 走，不跟消息流一起滚，所以挂 absolute 而不是塞进 .stream。 */
+.newPill {
+  position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  z-index: 30; display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 13px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--accent);
+  font: inherit; font-size: 12px; cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .16);
+}
+.newPill:hover { background: var(--soft); }
+/* 这里必须显式关掉。上面写了 display: inline-flex，会把 hidden 自带的
+   display: none 顶掉，结果提示条一直挂在顶上不下来。 */
+.newPill[hidden] { display: none; }
+.newPill svg { width: 12px; height: 12px; display: block; }
 
 /* 输入框上方的引用条。微信那种手感：显示回复谁和原文开头，右边一个取消。 */
 .replyBar {
@@ -182,7 +287,9 @@ header button.hot { border-color: var(--accent); color: var(--accent); }
 .replyBar button:hover { color: var(--text); border-color: var(--accent); }
 .composer {
   border-top: 1px solid var(--border); padding: 10px 20px 14px;
-  display: flex; gap: 8px; align-items: flex-end; background: var(--panel);
+  /* 居中对齐。底对齐的话输入框是两行高，发言和发送会被顶到最下面，
+     中心线差十几个像素，看着往下坠。 */
+  display: flex; gap: 8px; align-items: center; background: var(--panel);
   position: relative;
 }
 /* @ 补全候选 */
@@ -260,14 +367,15 @@ dialog .bar > div { height: 100%; width: 0; background: var(--accent); transitio
 aside.people { border-right: 0; border-left: 1px solid var(--border); }
 .sect { display: flex; align-items: center; gap: 6px; }
 .sect .grow { flex: 1; }
-/* 加号要用 grid 居中。原来靠 line-height: 1 让文字自己居中，
-   18px 的方框里 baseline 会偏，加号看起来就贴在右上角。 */
+/* 加号用 SVG，不用文字。文字加号的字形贴着基线，18px 的方框里
+   视觉重心偏上，grid 居中也救不回来。 */
 .sect button.mini {
   width: 18px; height: 18px; padding: 0; border-radius: 5px;
   display: grid; place-items: center; line-height: 1;
   border: 1px solid var(--border); background: transparent; color: var(--muted);
   font: inherit; font-size: 13px; cursor: pointer;
 }
+.sect button.mini svg { width: 10px; height: 10px; display: block; }
 .sect button.mini:hover { background: var(--soft); color: var(--text); }
 
 .members { flex: 1; overflow-y: auto; padding: 2px 8px 8px; min-height: 0; }
@@ -299,6 +407,17 @@ aside.people { border-right: 0; border-left: 1px solid var(--border); }
   padding: 8px 14px 12px; border-top: 1px solid var(--border);
   font-size: 11px; color: var(--muted); line-height: 1.5;
 }
+/* 作者主页入口。跟 LumEdit、camera-watermark 保持一致：纯图标，不占文字宽度。
+   放在左下角用户卡右边，没选频道时右栏整个是藏起来的，搁那儿就点不到了。 */
+.social-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; flex: none;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.social-btn:hover { color: var(--accent); background: var(--soft); border-color: var(--border); }
+.social-btn svg { width: 16px; height: 16px; display: block; }
 .pickList { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; margin-bottom: 14px; }
 .pickList button {
   text-align: left; padding: 8px 12px; border-radius: 8px; cursor: pointer;
@@ -422,7 +541,9 @@ details.advanced summary { cursor: pointer; color: var(--muted); padding: 8px 0;
     </div>
     <div class="sect">
       <span class="grow">频道</span>
-      <button class="mini" id="btnNewProj" title="新建频道">+</button>
+      <button class="mini" id="btnNewProj" title="新建频道" aria-label="新建频道">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
+      </button>
     </div>
     <div class="projects" id="projects"></div>
     <div class="me">
@@ -434,9 +555,21 @@ details.advanced summary { cursor: pointer; color: var(--muted); padding: 8px 0;
         </span>
         <span class="settingsBadge" id="settingsBadge" hidden title="有可用更新"></span>
       </button>
+      <!-- 作者主页入口。只留 GitHub，指向本仓库。 -->
+      <button class="social-btn" type="button" title="GitHub" aria-label="GitHub" data-url="https://github.com/shiraijikuu/AgentChat">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </button>
     </div>
   </aside>
-  <main>
+  <main id="main" class="no-channel">
+    <div class="welcome" id="welcome">
+      <div class="big">💬</div>
+      <div>左边选一个频道开始</div>
+    </div>
+    <button class="newPill" id="newPill" type="button" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path id="newChev" d="M6 15l6-6 6 6"/></svg>
+      <span id="newText"></span>
+    </button>
     <header>
       <div class="title" id="projName">加载中</div>
       <div class="meta" id="projMeta"></div>
@@ -880,11 +1013,20 @@ $('btnSaveName').addEventListener('click', async () => {
 });
 
 const state = {
-  project: localStorage.getItem('chat.project') || 'general',
+  // 打开时故意不选频道。以前拿 localStorage 里那个恢复，一进来就停在某个频道上，
+  // 别的频道攒了多少未读根本看不见。现在留白，让人自己点。
+  project: null,
   messages: [],
   seen: new Set(),
   unread: {},
   mentionUnread: {},
+  // 当前频道里还没读的那批。count 是条数，firstId 是第一条，点提示条跳过去。
+  newSince: { count: 0, firstId: null },
+  // 进频道时上次看到哪儿。dividerId 是那条消息的 id，分隔线插在它前面。
+  // scrollToDivider 只在刚打开时置一次，之后新消息进来重渲染不要把阅读位置拽走。
+  dividerId: null,
+  dividerCount: 0,
+  scrollToDivider: false,
   agents: {},
   projects: [],
   members: [],
@@ -910,45 +1052,149 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// 文件路径。跟服务端 parseFileRefs 认的是同一套：带盘符的绝对路径，可选行号。
-// 先换成占位符再转义，否则路径里的 & 会被转成 &amp; 把链接搞坏。
-// 中文标点要当分隔符，不然「看 E:/a.mjs，还有 B」会把「，还有」吞进路径。
-const WIN_PATH_RE = /[A-Za-z]:[\\/][^\s"'`<>|*?\n，。；：！？、（）【】「」『』《》…]*/g;
-const TRAIL_PUNCT = '.,;!?)]}>、。，；：！？）」』】…';
-
-function trimPathTail(raw) {
-  let s = raw;
-  while (s.length > 3 && TRAIL_PUNCT.includes(s[s.length - 1])) s = s.slice(0, -1);
-  return s;
-}
+// 文件路径引用。解析只在服务端做一份（src/store.mjs 的 parseFileRefs），
+// 前端不再自己拿正则扫一遍 —— 两份各写各的必然漂移，而且前端扫出来的东西
+// 没有 filesVersion / source 可言，没法标「待确认」。
+//
+// 消费的是消息上的三样东西：
+//   files         已确认的引用，带 occurrences（start/end 是正文的 UTF-16 下标）
+//   fileCandidates 解析不确定的引用，标「待确认」，不做成链接
+//   filesMeta     { version, source, degraded, reasons }
+//
+// filesMeta.source === null 表示这条消息的文件字段无法校验（未知 filesVersion）。
+// 那种情况不装饰、不猜、不回落老正则 —— 正文照原样显示，只在下面挂一句说明。
+// files === null 且 source === null 是成对出现的，不能把 null 当 [] 用。
 
 // 打开文件只认路径本身，行号不能带进去，否则 extname 拿到 ".mjs:64" 就判断不出来
 function pathHref(p) {
-  const bare = String(p).replace(/:(\d+)(?:-(\d+))?$/, '');
+  const bare = String(p).replace(/:(\d+)(-(\d+))?$/, '');
   const norm = bare.replace(/\\/g, '/');
   return 'file:///' + norm.replace(/^\/+/, '');
 }
 
-function bodyHtml(text) {
-  const refs = [];
-  let s = String(text).replace(WIN_PATH_RE, (raw) => {
-    const clean = trimPathTail(raw);
-    if (clean.length < 4) return raw;
-    refs.push(clean);
-    return `\uE000${refs.length - 1}\uE001`;
-  });
+// 消息里支持的轻量标记只有三种：围栏代码块、行内代码、加粗。别的 markdown 一概不认，
+// 半套语法比不支持更绕人。顺序要紧：
+// 一，代码先抽成占位符。这样路径和 @ 都扫不到代码里的内容，
+//     否则代码块里贴一段 https://... 或者 @xxx 就会被当成真引用。
+// 二，文件引用按服务端给的区间整段替换。区间是 UTF-16 下标，正文本身不做任何预处理，
+//     所以 start/end 直接对得上。替换从后往前做，前面的下标不会被打乱。
+// 三，加粗放在转义之后。占位符里没有 *，不会误伤代码块里的星号。
+const FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
+const TICK_RE = /`([^`\n]+)`/g;
+const BOLD_RE = /\*\*([^*\n]+)\*\*/g;
 
+// 一条消息的 files 装饰成 HTML。返回 { html, note }。
+// note 非空时调用方要在气泡下面挂一行灰字说明。
+function decorateBody(text, m) {
+  const meta = (m && m.filesMeta) || null;
+  const files = m && m.files;
+  const cands = (m && m.fileCandidates) || [];
+
+  // 无法校验：不装饰，只挂说明。绝不回落到老正则。
+  if (meta && meta.source === null) {
+    return { html: bodyHtml(text, null), note: `文件引用无法校验（${(meta.reasons || []).join('; ') || '未知版本'}），未做解析` };
+  }
+
+  // 已确认 + 候选的区间合在一起，按 start 从大到小替换。
+  // 候选和已确认的区间可能重叠（同一个位置两种解读），已确认的优先，候选让开。
+  const spans = [];
+  const confirmed = Array.isArray(files) ? files : [];
+  for (const f of confirmed) {
+    for (const o of f.occurrences || []) {
+      spans.push({ start: o.start, end: o.end, kind: 'file', f, o });
+    }
+  }
+  for (const c of cands) {
+    for (const o of c.occurrences || []) {
+      const clash = spans.some((s) => s.start < o.end && o.start < s.end);
+      if (!clash) spans.push({ start: o.start, end: o.end, kind: 'cand', c, o });
+    }
+  }
+  spans.sort((a, b) => b.start - a.start);
+
+  let note = '';
+  if (meta && meta.degraded) {
+    note = `文件引用为读时重新解析（${(meta.reasons || []).join('; ') || '降级'}），可能与写入时不一致`;
+  } else if (meta && meta.source === 'derived') {
+    note = '这条是老消息，文件引用按当前规则重新解析';
+  }
+  const nCand = spans.filter((s) => s.kind === 'cand').length;
+  if (nCand) {
+    const extra = `有 ${nCand} 处路径解析不确定，已标「待确认」，点开可看备选`;
+    note = note ? `${note}；${extra}` : extra;
+  }
+
+  return { html: bodyHtml(text, spans), note };
+}
+
+// spans 为 null 表示不做文件装饰（无法校验的情况）。
+function bodyHtml(text, spans) {
+  const src = String(text);
+  const codes = [];
+  const refs = [];
+
+  // 一、先算出代码区间的绝对位置。
+  // 服务端解析时并不知道哪里是代码块（它只看正文），所以代码块里贴的路径也会被收进
+  // files。这里在渲染前把落在代码区间内的引用整条丢掉 —— 代码里的路径不该变成链接，
+  // 那会把可复制的代码文本切碎。
+  const codeRanges = [];
+  for (const m of src.matchAll(FENCE_RE)) codeRanges.push([m.index, m.index + m[0].length]);
+  for (const m of src.matchAll(TICK_RE)) codeRanges.push([m.index, m.index + m[0].length]);
+  const inCode = (a, b) => codeRanges.some(([x, y]) => a < y && x < b);
+
+  // 二、文件引用落位。区间是相对原始正文的 UTF-16 下标，从后往前替换，
+  // 前面的下标不受影响。占位符用 \uE000 i \uE001。
+  let s = src;
+  if (Array.isArray(spans)) {
+    const usable = spans.filter((sp) => !inCode(sp.start, sp.end));
+    for (const sp of usable) {
+      if (sp.start < 0 || sp.end > s.length || sp.start >= sp.end) continue;
+      refs.push(sp);
+      s = s.slice(0, sp.start) + `\uE000${refs.length - 1}\uE001` + s.slice(sp.end);
+    }
+  }
+
+  // 三、代码块抽成占位符 \uE002 i \uE003。这时候正文里已经只有文件占位符，
+  // 代码内容里不会再有真路径，两套占位符互不干扰。
+  const holdCode = (c) => {
+    codes.push(c);
+    return `\uE002${codes.length - 1}\uE003`;
+  };
+  // 围栏代码块，语言名忽略不做高亮。末尾那个换行去掉，不然代码块下面多一行空白。
+  s = s.replace(FENCE_RE, (m, lang, code) => holdCode({ code: code.replace(/\n$/, ''), inline: false }));
+  // 行内代码。不许跨行，避免把两个反引号之间的整段正文吃掉。
+  s = s.replace(TICK_RE, (m, code) => holdCode({ code, inline: true }));
+
+  // 四、转义之后再做行内标记，占位符里没有 * 也没有 @，不会误伤。
   s = escapeHtml(s);
   // @全体成员 先处理：中文不在 @名字 的字符集里，顺序其实无所谓，放前面更直观
   s = s.replace(/@(全体成员|all|everyone|here)(?![A-Za-z0-9_-])/gi,
     (m) => `<span class="at all">${m}</span>`);
   s = s.replace(/@([A-Za-z0-9_-]{1,64})/g, '<span class="at">@$1</span>');
+  s = s.replace(BOLD_RE, '<strong>$1</strong>');
+
+  // 五、还原占位符。代码先还原（它不包含文件占位符），再还原文件。
+  s = s.replace(/\uE002(\d+)\uE003/g, (_, i) => {
+    const c = codes[Number(i)];
+    if (!c) return '';
+    const esc = escapeHtml(c.code);
+    return c.inline ? `<code class="inline">${esc}</code>` : `<pre class="code"><code>${esc}</code></pre>`;
+  });
 
   s = s.replace(/\uE000(\d+)\uE001/g, (_, i) => {
-    const p = refs[Number(i)];
-    const esc = escapeHtml(p);
-    return `<a class="fref" href="${escapeHtml(pathHref(p))}" data-path="${esc}" target="_blank" title="点击用默认程序打开，路径会同时复制">${esc}</a>`;
+    const sp = refs[Number(i)];
+    if (!sp) return '';
+    const shown = escapeHtml(sp.o.raw);
+    if (sp.kind === 'cand') {
+      // 候选不做成链接、不进 data-path，只标「待确认」，备选放在 title 里。
+      const alts = (sp.c.alternatives || []).map((a) => escapeHtml(a)).join('\n');
+      return `<span class="fref cand" title="解析不确定，备选：\n${alts}">${shown}<span class="candmark">待确认</span></span>`;
+    }
+    const p = sp.f.path;
+    const lineTag = sp.o.line ? ':' + sp.o.line + (sp.o.lineEnd ? '-' + sp.o.lineEnd : '') : '';
+    return `<a class="fref" href="${escapeHtml(pathHref(p))}" data-path="${escapeHtml(p + lineTag)}" target="_blank" title="点击用默认程序打开，路径会同时复制">${shown}</a>`;
   });
+
   return s;
 }
 function fmtTime(ts) { return String(ts || '').slice(11, 16); }
@@ -1025,11 +1271,14 @@ function renderProjects(list) {
       right.className = 'badge on' + (mu ? ' mention' : '');
       right.textContent = mu ? '@' + mu : un;
     } else {
+      // 没未读就空着。这里以前显示总条数，跟微信那个位置的含义对不上，
+      // 读完了还挂个数字，看着像一直没读。
       right.className = 'n';
-      right.textContent = p.count;
+      right.textContent = '';
     }
     el.append(nm, right);
-    el.onclick = () => switchProject(p.name);
+    // 点当前频道就退出去，回到空状态；点别的频道正常切过去。
+    el.onclick = () => (p.name === state.project ? closeProject() : switchProject(p.name));
     // 右键改名或删频道
     el.oncontextmenu = (e) => {
       e.preventDefault();
@@ -1041,6 +1290,7 @@ function renderProjects(list) {
 
 function renderMessages() {
   const box = $('stream');
+  const prevTop = box.scrollTop;
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   box.innerHTML = '';
   const me = meInput.value.trim();
@@ -1052,10 +1302,20 @@ function renderMessages() {
     return;
   }
   for (const m of state.messages) {
+    // 上次看到的那条前面插一条分隔线，像微信那样。这条一直留到换频道，
+    // 免得读到一半来了条新消息，线突然没了。
+    if (state.dividerId && m.id === state.dividerId) {
+      const dv = document.createElement('div');
+      dv.className = 'newDivider';
+      dv.textContent = `以下是 ${state.dividerCount} 条新消息`;
+      box.appendChild(dv);
+    }
     const ms = Array.isArray(m.mentions) ? m.mentions : [];
     const mentioned = ms.includes(me) && m.from !== me;
     const wrap = document.createElement('div');
     wrap.className = 'msg' + (m.from === me ? ' own' : '') + (mentioned ? ' tome' : '');
+    // 未读提示条要能滚到第一条未读，靠这个 id 找元素
+    wrap.dataset.id = m.id;
     // 右键这条消息，可以引用回复，也可以复制
     wrap.oncontextmenu = (e) => {
       e.preventDefault();
@@ -1095,14 +1355,33 @@ function renderMessages() {
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = bodyHtml(m.body);
+    const deco = decorateBody(m.body, m);
+    bubble.innerHTML = deco.html;
     wrap.appendChild(bubble);
+    if (deco.note) {
+      const n = document.createElement('div');
+      n.className = 'filesnote';
+      n.textContent = deco.note;
+      wrap.appendChild(n);
+    }
     box.appendChild(wrap);
   }
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  // 刚打开频道就停在第一条未读上，接着往下读就是新内容。
+  // 直接滚到底的话，还得自己往上翻才知道上次看到哪儿。
+  const dv = state.dividerId ? box.querySelector('.newDivider') : null;
+  if (dv && state.scrollToDivider) {
+    state.scrollToDivider = false;
+    const top = dv.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    box.scrollTop = Math.max(0, top - 8);
+  } else if (atBottom) {
+    box.scrollTop = box.scrollHeight;
+  } else {
+    box.scrollTop = prevTop;
+  }
 }
 
 function renderHeader() {
+  if (!state.project) return;
   $('projName').textContent = state.project;
   // 绑了项目的频道，把说明放在最前面，一眼知道这个频道在干什么
   const cur = state.projects.find((p) => p.name === state.project) || {};
@@ -1123,6 +1402,13 @@ function colorOf(name) {
 }
 
 async function loadMembers() {
+  // 没选频道就没有成员可看，右栏这时候整个是藏起来的
+  if (!state.project) {
+    state.members = [];
+    state.isMain = false;
+    renderMembers();
+    return;
+  }
   try {
     const d = await (await fetch('/api/members?project=' + encodeURIComponent(state.project))).json();
     state.members = d.members || [];
@@ -1259,11 +1545,91 @@ async function openInvite(name) {
   $('inviteDlg').showModal();
 }
 
+// ---- 未读 ----
+//
+// 界面本身就是一个 agent，但它没有服务端游标，读没读过只能在本地记。
+// 存「读到第几条」而不是消息 id：频道列表接口本来就给 count，算未读时
+// 一次相减就行，不用为了数未读把每个频道的历史都拉一遍。
+const readKey = (name) => 'chat.readCount.' + name;
+
+function readCountOf(name) {
+  const n = Number(localStorage.getItem(readKey(name)));
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function markRead(name, count) {
+  localStorage.setItem(readKey(name), String(count));
+  state.unread[name] = 0;
+  state.mentionUnread[name] = 0;
+}
+
+// 有没有选中频道，决定右边是留白还是显示消息区
+function applyChannelVisibility() {
+  const open = !!state.project;
+  $('main').classList.toggle('no-channel', !open);
+  document.body.classList.toggle('no-channel', !open);
+  if (!open) hideNewPill();
+}
+
+function showNewPill(count, firstId) {
+  state.newSince = { count, firstId: firstId || null };
+  $('newText').textContent = `${count} 条新消息`;
+  $('newPill').hidden = false;
+  updateChev();
+}
+
+function hideNewPill() {
+  state.newSince = { count: 0, firstId: null };
+  $('newPill').hidden = true;
+}
+
+// 箭头朝哪边看第一条未读在哪。多数情况是「刚进来，未读都在上面」，朝上。
+function updateChev() {
+  const id = state.newSince.firstId;
+  let up = true;
+  if (id) {
+    const box = $('stream');
+    const el = box.querySelector(`[data-id="${id}"]`);
+    if (el) up = el.offsetTop < box.scrollTop + box.clientHeight / 2;
+  }
+  $('newChev').setAttribute('d', up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6');
+}
+
+$('newPill').addEventListener('click', () => {
+  const box = $('stream');
+  const id = state.newSince.firstId;
+  const el = id ? box.querySelector(`[data-id="${id}"]`) : null;
+  if (el) el.scrollIntoView({ block: 'center' });
+  else box.scrollTop = box.scrollHeight;
+  hideNewPill();
+});
+
+// 滚回底部就当读过了，提示条收起来
+$('stream').addEventListener('scroll', () => {
+  const box = $('stream');
+  if (box.scrollHeight - box.scrollTop - box.clientHeight < 60) hideNewPill();
+  else if (!state.newSince.count) return;
+  else updateChev();
+});
+
 async function loadProjects() {
   try {
     const d = await (await fetch('/api/projects')).json();
     state.agents = d.agents || {};
     state.projects = d.projects || [];
+    // 未读数一律按「总条数减去本地记的已读条数」重算，不靠 SSE 累加。
+    // 累加的话刷新一次就归零，重连时还可能重复计数。@ 的数还是只由 SSE 给，
+    // 那个没法从条数推出来。
+    for (const p of state.projects) {
+      // 本地还没这个频道的游标，说明是第一次见它。这时候把当前条数当成已读，
+      // 不然新装、换端口之后所有频道一律显示全量条数，看着像一堆没读过的。
+      // 微信也是这个规矩，历史消息不算未读。
+      const key = readKey(p.name);
+      if (localStorage.getItem(key) === null) localStorage.setItem(key, String(p.count));
+      const n = p.count - readCountOf(p.name);
+      state.unread[p.name] = n > 0 ? n : 0;
+      if (!state.unread[p.name]) state.mentionUnread[p.name] = 0;
+    }
     renderProjects(state.projects);
     setOnline(true);
     return state.projects;
@@ -1273,24 +1639,63 @@ async function loadProjects() {
   }
 }
 
-async function loadMessages(project) {
+async function loadMessages(project, pending = 0) {
   const d = await (await fetch('/api/messages?project=' + encodeURIComponent(project))).json();
   state.messages = d.messages || [];
   state.seen = new Set(state.messages.map((m) => m.id));
-  state.unread[project] = 0;
-  state.mentionUnread[project] = 0;
+  // 打开就算读过了。攒下的条数由 switchProject 先抓下来传进来，
+  // 分隔线用的是那个数，不是这里清零之后的 0。
+  markRead(project, state.messages.length);
+  // 攒下的未读从第几条开始。pending 比总数还大说明本地记的已读没了
+  // （换端口或清过缓存都会这样），那就从第一条算起。
+  if (pending > 0) {
+    const idx = Math.max(0, state.messages.length - pending);
+    const first = state.messages[idx];
+    state.dividerId = first ? first.id : null;
+    state.dividerCount = state.messages.length - idx;
+    state.scrollToDivider = true;
+  } else {
+    state.dividerId = null;
+    state.dividerCount = 0;
+    state.scrollToDivider = false;
+  }
   renderMessages();
   renderHeader();
 }
 
 async function switchProject(name) {
+  const pending = state.unread[name] || 0;
   state.project = name;
   // 引用的是上一个频道里的消息，换频道就作废，不然 replyTo 指过去也对不上
   cancelReply();
   localStorage.setItem('chat.project', name);
-  await loadMessages(name);
+  applyChannelVisibility();
+  // 换频道了，旧频道的提示条不该跟过来
+  hideNewPill();
+  await loadMessages(name, pending);
   await loadProjects();
   await loadMembers();
+}
+
+// 再点一下已经打开的频道，退回「左边选一个频道开始」那个空状态。
+// 微信里点当前会话不会退出，这里故意不一样：退出得有个不用键盘的入口，
+// 不然想回到全貌只能刷新页面，刷新还会丢掉刚滚到一半的位置。
+// 不推进已读游标，刚才看过的照样算看过。
+async function closeProject() {
+  state.project = '';
+  cancelReply();
+  localStorage.removeItem('chat.project');
+  applyChannelVisibility();
+  hideNewPill();
+  // 清掉上一个频道的消息，不然退回空状态后再点别的频道，
+  // 中间那一瞬会闪一下旧内容。
+  state.messages = [];
+  state.seen = new Set();
+  state.dividerId = null;
+  state.dividerCount = 0;
+  state.scrollToDivider = false;
+  renderMessages();
+  await loadProjects();
 }
 
 $('btnReplyCancel').addEventListener('click', () => { cancelReply(); $('msgBody').focus(); });
@@ -1299,6 +1704,8 @@ $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = $('msgBody').value.trim();
   if (!body) return;
+  // 没选频道时输入框是藏起来的，正常点不到。留着是防快捷键之类绕过。
+  if (!state.project) { toast('先在左边选一个频道'); return; }
   const btn = $('sendBtn');
   btn.disabled = true;
   try {
@@ -1489,6 +1896,16 @@ es.onmessage = (ev) => {
         state.messages.push(d.msg);
         renderMessages();
         renderHeader();
+        // 停在底部说明这条当场就看见了，直接算读过。翻着历史的话就亮提示条，
+        // 别把人正在看的位置冲掉。
+        const box = $('stream');
+        if (box.scrollHeight - box.scrollTop - box.clientHeight < 60) {
+          markRead(d.project, state.messages.length);
+        } else if (state.newSince.count) {
+          showNewPill(state.newSince.count + 1, state.newSince.firstId || d.msg.id);
+        } else {
+          showNewPill(1, d.msg.id);
+        }
       }
     } else {
       state.unread[d.project] = (state.unread[d.project] || 0) + 1;
@@ -1670,6 +2087,15 @@ $('btnSettings').addEventListener('click', () => openSettings('identity'));
 $('btnSettingsClose').addEventListener('click', closeSettings);
 $('settingsDlg').addEventListener('cancel', (e) => { e.preventDefault(); closeSettings(); });
 document.querySelectorAll('[data-settings-page]').forEach((b) => b.addEventListener('click', () => showSettingsPage(b.dataset.settingsPage)));
+
+// 作者主页入口。主进程的 setWindowOpenHandler 会把 http(s) 交给系统浏览器打开，
+// 这里只管 window.open，不要在渲染层拼 shell 命令。
+document.querySelectorAll('.social-btn').forEach((b) => {
+  b.addEventListener('click', () => {
+    const url = b.dataset.url;
+    if (url) window.open(url, '_blank');
+  });
+});
 
 document.querySelectorAll('.modeCard').forEach((b) => b.addEventListener('click', () => {
   appearanceDraft.mode = b.dataset.mode;
@@ -1942,20 +2368,17 @@ function askFirstName() {
 (async () => {
   await loadDefaultName();
   await loadAppSettings();
-  const projects = await loadProjects();
+  await loadProjects();
   // 是不是第一次用。判据是服务端一个成员都没有，且本地没存过名字。
   // 不拿 localStorage 单打独斗，它按 origin 分，端口一变就空，
   // 只看它的话换个端口就会再弹一次。
   if (state.online && !Object.keys(state.agents).length && !localStorage.getItem('chat.me')) {
     await askFirstName();
   }
-  const names = projects.map((p) => p.name);
-  if (names.length && !names.includes(state.project)) state.project = names[0];
-  await loadMessages(state.project);
-  await loadProjects();
-  await loadMembers();
+  // 故意不自动进频道。以前这里会挑第一个塞进 state.project，结果一打开就停在
+  // 某个频道上，别的频道攒了多少未读根本看不见。现在右边留白，谁有未读看左边。
+  applyChannelVisibility();
   await checkIdentity(true);
-  $('msgBody').focus();
   // 启动后静默查一次更新。等首屏和消息都加载完再查，别跟启动抢网络。
   // 发现新版本时设置图标上会亮一个点，用户不用自己想起来去点「检查更新」。
   setTimeout(() => { void fetchUpdate(true); }, 8000);

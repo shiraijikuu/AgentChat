@@ -503,12 +503,23 @@ async function main() {
       console.log('');
     }
     for (const m of d.messages) printMsg(m, true);
+    // 这一页只列了 count 条，total 是符合条件的总数。两个不一样说明还有没列出来的，
+    // 以前是直接截断不吭声，前面的等于被吞了。
+    const more = Math.max(0, (Number(d.total) || d.count) - d.count);
     if (!all && !noMark) {
       const last = d.messages[d.messages.length - 1];
       await api.ackInbox(me, last);
       console.log(`\n${d.count} 条，已标记为读过。不想标记就加 --nomark`);
+      if (more > 0) console.log(`还有 ${more} 条没列出来，再跑一次 inbox 接着看。`);
     } else if (all) {
       console.log(`\n共 ${d.count} 条（--all 不标记已读）`);
+      if (more > 0) console.log(`还有 ${more} 条没列出来，加 --limit 或者翻页再看。`);
+    } else {
+      // --nomark 也要打一行统计。以前这个分支一句话都不打，而 hook 拉起 agent
+      // 用的就是 inbox --nomark，等于拿不到总数，没法算这一轮还剩多少没处理。
+      // count 是这页列了几条，total 是符合条件的总数。
+      console.log(`\n${d.count} 条（--nomark 只看不标记），共 ${Number(d.total) || d.count} 条`);
+      if (more > 0) console.log(`还有 ${more} 条没列出来，加 --limit 或者翻页再看。`);
     }
     return;
   }

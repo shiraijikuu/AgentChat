@@ -55,53 +55,292 @@ export function mentionsAllIn(body) {
   return /@(all|everyone|here)(?![A-Za-z0-9_-])/i.test(s);
 }
 
-// 文件路径引用。
+// ---------- 文件路径引用 ----------
 //
-// 只认带盘符的绝对路径（D:\work\a.mjs、D:/work/a.mjs），不认相对路径：
-// 相对路径跟版本号、域名、比例写法混在一起没法可靠区分，宁可漏也不误伤。
-// 行号用 :123 或 :123-456，跟编辑器跳转的写法一致。
-// 路径里可以有中文（E:/图片/raw/a.ARW），但中文标点必须当分隔符，
-// 否则「看 E:/a.mjs，还有 B」会把「，还有」一起吞进路径。
-const WIN_PATH_RE = /[A-Za-z]:[\\/][^\s"'`<>|*?\n，。；：！？、（）【】「」『』《》…]*/g;
-const TRAIL_PUNCT = '.,;!?)]}>、。，；！？）」』】…';
+// 契约（2026-10-26 与 codex / workbuddy 在 web 频道定稿，改这个函数之前先把这段读完）：
+//
+// 1. 两类结果分开：`files` 只放已确认的引用，`fileCandidates` 放解析不确定的。
+//    候选不进 msg.files、不进 hooks 的 AGENT_CHAT_FILES、不渲染成可点链接 ——
+//    只标「待确认」。把不确定性藏起来比漏收更坏。
+// 2. 显式分隔优先：反引号、双引号、单引号、尖括号里的内容全量取，不再套启发式。
+//    正文其余部分走裸式。路径里有空格或 ASCII/CJK 交界，自己加引号，机器不猜。
+// 3. CJK 边界不可词法判定。E:\docs\report最终版.txt 和 E:\codex\webapi我建立了文件夹
+//    在字符层面同形：前者截断得到不存在的路径，后者全量取得到真污染。
+//    所以不猜 —— 出候选 + alternatives，交给展示层标待确认。
+//    唯一确定的规则：CJK 紧跟 \ 或 / 才并入路径（E:\图片\raw 保住），
+//    紧跟 ASCII 字母数字就截断并标 ambiguous。
+// 4. 行号 :123 / :123-456 在去引号之后解析。
+// 5. 去重按 path|line|lineEnd 三元组；同一引用多次出现，occurrences 全部保留，
+//    区间用 JS UTF-16 下标、start 含 end 不含。
+// 6. 大小写折叠只用于归组，且只声明支持「大小写不敏感」的路径语义。
+//    大小写敏感卷是已知限制，不声称已兜底 —— existsSync 只能证明两个拼写都存在，
+//    证明不了是同一个文件。打开文件按 occurrence.raw 的字面拼写走，不按归组后的 path。
+//
+// 盘符前面不能紧跟英文字母。不加这个约束，正文里贴的 https://302ai.cn/x
+// 会从 s:// 开始匹配上，被当成盘符路径收进 msg.files。
+// 前面是中文或者空白都照旧认，所以「文件在E:\codex\a.mjs」不受影响。
 
+// 显式分隔区。前两种的字符在 Windows 文件名里非法，所以第一个闭合符就是终点。
+// 后两种（' 和 `）是合法文件名字符，闭合符后面必须跟分隔符才算闭合，
+// 否则 'E:\it's\c.txt' 会在 it 后面那个撇号处提前截断。
+const QUOTES = [
+  { open: '"', close: '"', strict: true },
+  { open: '<', close: '>', strict: true },
+  { open: "'", close: "'", strict: false },
+  { open: '`', close: '`', strict: false },
+];
+const SEP_AFTER_QUOTE = /[\s，。；：！？、（）【】「」『』《》…,;:!?)\]}>|]/;
+const BARE_STOP = /[\s"'`<>|*?\n，。；：！？、（）【】「」『』《》…]/;
+// 尾冒号也算标点：`E:\a.txt:` 是打字带出来的，不是行号。:123 这种带数字的不会被剥。
+const TRAIL_PUNCT = '.,;!?:)]}>、。，；：！？」』】…';
+
+// 裸路径起点：盘符，或 UNC（\\?\、\\.\、\\server\share）。
+// 前面不能紧跟字母数字（否则 https:// 里的 s:// 会被当成盘符），
+// 也不能紧跟斜杠或反斜杠（否则 UNC 的第二段会被再收一次）。
+const PATH_START_RE = /(?<![A-Za-z0-9\\/])(?:[A-Za-z]:[\\/]|\\\\[?.]\\|\\\\[A-Za-z0-9._$-]+\\)/g;
+
+function isCJK(ch) {
+  const c = ch.codePointAt(0);
+  return (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff)
+    || (c >= 0x20000 && c <= 0x3ffff);
+}
+
+// 折叠重复反斜杠，但 UNC 前缀区（\\?\ / \\.\ / \\server\share）里的双反斜杠要保住。
+// 不保的话 \\server\share 会被折成 \server\share，直接打不开。
+function normalizePath(p) {
+  const u = /^(\\\\[?.]\\)/.exec(p) || /^(\\\\[^\\]+\\[^\\]+)/.exec(p);
+  const prefix = u ? u[0] : '';
+  const rest = u ? p.slice(prefix.length) : p;
+  return prefix + rest.replace(/\\\\/g, '\\');
+}
+
+// 归组键专用。盘符大写、其余小写、斜杠统一成反斜杠。只用于去重，不进输出。
+function foldKey(p) {
+  const s = String(p).replace(/\//g, '\\');
+  return /^[A-Za-z]:/.test(s) ? s[0].toUpperCase() + s.slice(1).toLowerCase() : s.toLowerCase();
+}
+
+// 从裸式起点往后吃到不能吃为止，同时记下 CJK 紧跟 ASCII 的截断点。
+function readPathAt(text, start) {
+  let i = start;
+  let cutAt = -1;
+  while (i < text.length) {
+    const ch = text[i];
+    if (BARE_STOP.test(ch)) break;
+    if (isCJK(ch)) {
+      const prev = i > start ? text[i - 1] : '';
+      if (prev === '\\' || prev === '/') { i += 1; continue; }
+      if (cutAt < 0 && /[A-Za-z0-9_]/.test(prev)) cutAt = i;
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+  return { end: i, cutAt };
+}
+
+// 把一段候选文本解析成 {path, line, lineEnd, raw}。不是绝对路径就返回 null。
+function parseOne(token) {
+  let raw = String(token).trim();
+  while (raw.length > 3) {
+    const c = raw[raw.length - 1];
+    if (TRAIL_PUNCT.includes(c)) { raw = raw.slice(0, -1); continue; }
+    break;
+  }
+  if (raw.length < 4) return null;
+
+  let file = raw;
+  let line = null;
+  let lineEnd = null;
+  const lm = raw.match(/^(.*?):(\d+)(?:-(\d+))?$/);
+  if (lm && lm[1].length > 3) {
+    file = lm[1];
+    line = Number(lm[2]);
+    lineEnd = lm[3] ? Number(lm[3]) : null;
+  }
+  if (!/^(?:[A-Za-z]:[\\/]|\\\\)/.test(file)) return null;
+  return { path: normalizePath(file), line, lineEnd, raw };
+}
+
+// 返回 { files, candidates }。files 是已确认的，candidates 是要展示层标待确认的。
 export function parseFileRefs(body) {
   const text = String(body ?? '');
-  const out = [];
-  const seen = new Set();
+  const files = [];
+  const candidates = [];
+  const byKey = new Map();
+  const candByKey = new Map();
+  const masked = text.split('');
 
-  for (const m of text.matchAll(WIN_PATH_RE)) {
-    let raw = m[0];
-    // 剥尾部的标点。冒号单独处理：:123 是行号要留着，裸冒号是标点。
-    while (raw.length > 3) {
-      const c = raw[raw.length - 1];
-      if (TRAIL_PUNCT.includes(c)) { raw = raw.slice(0, -1); continue; }
-      break;
+  const pushFile = (parsed, quoted, start, end) => {
+    const key = `${foldKey(parsed.path)}|${parsed.line ?? ''}|${parsed.lineEnd ?? ''}`;
+    let e = byKey.get(key);
+    if (!e) {
+      e = { path: parsed.path, line: parsed.line, lineEnd: parsed.lineEnd, raw: parsed.raw, quoted, occurrences: [] };
+      byKey.set(key, e);
+      files.push(e);
     }
-    if (raw.length < 4) continue;
+    e.occurrences.push({ start, end, line: parsed.line, lineEnd: parsed.lineEnd, raw: parsed.raw, quoted });
+  };
 
-    let file = raw;
-    let line = null;
-    let lineEnd = null;
-    const lm = raw.match(/^(.*?):(\d+)(?:-(\d+))?$/);
-    if (lm && lm[1].length > 3) {
-      file = lm[1];
-      line = Number(lm[2]);
-      lineEnd = lm[3] ? Number(lm[3]) : null;
+  const pushCand = (alts, parsed, raw, reason, start, end) => {
+    const uniq = [...new Set(alts.filter(Boolean))];
+    if (!uniq.length) return;
+    // candidatePath 可能是空串，不能当去重键，用 alternatives 拼。
+    const key = `${uniq.map(foldKey).join('\u0001')}|${parsed?.line ?? ''}|${parsed?.lineEnd ?? ''}`;
+    let e = candByKey.get(key);
+    if (!e) {
+      e = {
+        candidatePath: uniq[0] || null,
+        alternatives: uniq,
+        reason,
+        raw,
+        line: parsed?.line ?? null,
+        lineEnd: parsed?.lineEnd ?? null,
+        occurrences: [],
+      };
+      candByKey.set(key, e);
+      candidates.push(e);
     }
+    e.occurrences.push({ start, end, raw, line: parsed?.line ?? null, lineEnd: parsed?.lineEnd ?? null });
+  };
 
-    // Windows 路径不会有两个连续反斜杠，折叠一下。
-    // 有人从 JSON 或者转义过的日志里粘过来会带双斜杠，不折叠就打不开。
-    // UNC 路径不认（正则要求盘符开头），所以这里不用担心动到 \\server\share。
-    file = file.replace(/\\\\/g, '\\');
-
-    const key = `${file}:${line ?? ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ path: file, line, lineEnd, raw });
-    if (out.length >= MAX_FILES) break;
+  // 第一遍：显式分隔区。
+  const ranges = [];
+  for (const q of QUOTES) {
+    let i = 0;
+    while (i < text.length) {
+      const open = text.indexOf(q.open, i);
+      if (open < 0) break;
+      let close = -1;
+      for (let j = open + 1; j < text.length; j++) {
+        if (text[j] !== q.close) continue;
+        if (q.strict) { close = j; break; }
+        const nxt = text[j + 1];
+        if (nxt === undefined || SEP_AFTER_QUOTE.test(nxt)) { close = j; break; }
+      }
+      if (close < 0) {
+        ranges.push({ start: open, end: text.length, terminated: false, inner: text.slice(open + 1) });
+        break;
+      }
+      ranges.push({ start: open, end: close + 1, terminated: true, inner: text.slice(open + 1, close) });
+      i = close + 1;
+    }
   }
-  return out;
+  // 嵌套（比如 `"E:\a.txt"`）只认最外层，内层的引号字符在处理时剥掉。
+  ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+  const kept = [];
+  for (const r of ranges) {
+    if (kept.length && r.start < kept[kept.length - 1].end) continue;
+    kept.push(r);
+  }
+
+  for (const r of kept) {
+    for (let k = r.start; k < r.end; k++) masked[k] = ' ';
+    let inner = r.inner;
+    const QCH = '"\'<>`';
+    while (inner.length && QCH.includes(inner[0])) inner = inner.slice(1);
+    while (inner.length && QCH.includes(inner[inner.length - 1])) inner = inner.slice(0, -1);
+    inner = inner.trim();
+    const rawSpan = text.slice(r.start, r.end);
+    if (!r.terminated) {
+      // 缺闭合：区间内不做裸式回退，只出候选，让人自己补引号。
+      const p = parseOne(inner);
+      pushCand(p ? [p.path] : [inner], p, rawSpan, 'unterminated-quote', r.start, r.end);
+      continue;
+    }
+    const parsed = parseOne(inner);
+    if (parsed) pushFile(parsed, true, r.start, r.end);
+  }
+
+  // 第二遍：裸式。引号区已经抹成空格，不会重复收。
+  const bare = masked.join('');
+  for (const m of bare.matchAll(PATH_START_RE)) {
+    const start = m.index;
+    // \\?\ 前缀里的 ? 是 BARE_STOP 里的字符，直接扫会当场截断，
+    // 所以跳过前缀从设备路径本体开始吃。\\.\ 不受影响（. 不是停止符）。
+    const afterPrefix = /^\\\\\?\\/.test(m[0]) ? start + 4 : start;
+    const { end, cutAt } = readPathAt(bare, afterPrefix);
+    if (end <= start) continue;
+    const full = bare.slice(start, end);
+    const fullParsed = parseOne(full);
+    const cut = cutAt > start ? bare.slice(start, cutAt) : null;
+    const cutParsed = cut ? parseOne(cut) : null;
+    if (cutParsed) {
+      // 两种形态都像真路径，词法上分不出来 —— 出候选，不往 files 里塞。
+      const alts = [cutParsed.path, fullParsed ? fullParsed.path : null];
+      pushCand(alts, cutParsed, full, 'cjk-ascii-boundary', start, start + cutParsed.raw.length);
+      continue;
+    }
+    if (fullParsed) {
+      pushFile(fullParsed, false, start, start + fullParsed.raw.length);
+    }
+  }
+
+  // 候选的 alternatives 里出现某条已确认的 path，就丢掉这个候选（与正文先后无关）。
+  const confirmed = new Set(files.map((f) => foldKey(f.path)));
+  const keptCands = candidates.filter((c) => !c.alternatives.some((a) => confirmed.has(foldKey(a))));
+
+  return {
+    files: files.slice(0, MAX_FILES),
+    candidates: keptCands.slice(0, MAX_FILES),
+  };
+}
+
+// 读接口的 files 装饰。纯函数，绝不写盘 —— 派生只用于展示，
+// 不回放 hooks、不参与 inbox 命中、不改变游标。
+//
+// 四条不变量：
+// 1. source === null ⟺ files === null，不是 []。[] 表示「校验过，确实没有文件」，
+//    null 表示「无法校验，不要消费」。用 [] 冒充会让调用方以为读过。
+// 2. source === 'stored' → degraded === false。
+// 3. degraded === true → source === 'derived'。
+// 4. source === null → degraded === false（unsupported 不是降级）。
+//
+// 版本判定只看字段是否存在，禁用 ?? 1 / || 1 / if (v) / Number.isInteger(v || 0) 这四种写法：
+// 它们会把 null / false / 0 判成 1，而这三个值都该落到 unsupported。
+export function decorateFiles(rec) {
+  if (!rec || typeof rec !== 'object') return rec;
+  const body = String(rec.body ?? '');
+
+  if (!Object.prototype.hasOwnProperty.call(rec, 'filesVersion')) {
+    // v1：老记录。files 是旧结构，读时按新契约重新解析并标 derived。
+    const d = parseFileRefs(body);
+    rec.files = d.files;
+    rec.fileCandidates = d.candidates;
+    rec.filesMeta = { version: 1, source: 'derived', degraded: false, reasons: [] };
+    return rec;
+  }
+
+  const v = rec.filesVersion;
+  if (v === 2) {
+    const okShape = rec.files === null || (Array.isArray(rec.files) && rec.files.every((f) => (
+      f && typeof f.path === 'string' && Array.isArray(f.occurrences)
+      && f.occurrences.every((o) => o && Number.isInteger(o.start) && Number.isInteger(o.end)
+        && o.start >= 0 && o.end <= body.length && o.start <= o.end
+        && typeof o.raw === 'string' && body.slice(o.start, o.end).includes(o.raw.replace(/:\d+(?:-\d+)?$/, '')))
+    )));
+    if (okShape) {
+      rec.filesMeta = { version: 2, source: 'stored', degraded: false, reasons: [] };
+      return rec;
+    }
+    // v2 但区间对不上原文：降级为派生，明确标 degraded，不冒充原样 v2。
+    const d = parseFileRefs(body);
+    rec.files = d.files;
+    rec.fileCandidates = d.candidates;
+    rec.filesMeta = { version: 2, source: 'derived', degraded: true, reasons: ['occurrence-range-mismatch'] };
+    return rec;
+  }
+
+  // 显式未知或非法：不回落 v1、不派生、不写回。
+  rec.files = null;
+  rec.fileCandidates = null;
+  rec.filesMeta = {
+    version: null,
+    source: null,
+    degraded: false,
+    reasons: [`unsupported-version:${v === null ? 'null' : typeof v}:${JSON.stringify(v)}`],
+  };
+  return rec;
 }
 
 // 解析 @。allNames 是当前所有 agent 的名字，@全体 的时候要展开成具体的人，
@@ -230,6 +469,9 @@ export class Store {
     const reg = this.registry();
     for (const m of out) {
       if (!m.fromId && m.from && reg[m.from]) m.fromId = reg[m.from].id;
+      // 读时装饰 files：v2 原样用、v1 重新解析标 derived、未知版本标 unsupported。
+      // 纯内存派生，不写盘 —— 派生只用于展示，不回放 hooks、不参与 inbox 命中。
+      decorateFiles(m);
     }
     return out;
   }
@@ -362,7 +604,11 @@ export class Store {
         }
       }
     }
-    return list.slice(-Math.min(Math.max(Number(limit) || 100, 1), 500));
+    // 从头取，不取尾。以前是 slice(-N)，未读超过 N 条时窗口外的那些会被
+    // 下一次 ack 直接跨过去，等于静默丢掉。从头取配上 ack 游标，多跑一次
+    // 就能把剩下的接着处理完，一条都不会漏。
+    const n = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    return { messages: list.slice(0, n), total: list.length };
   }
 
   // ---------- 收件箱游标 ----------
@@ -487,6 +733,10 @@ export class Store {
     // 单人频道展开后可以是空数组，但 mentionsAll 仍明确记录这是一次频道广播。
     if (!mentionsAllIn(text) && recipients().length === 0) text = `@全体成员 ${text}`;
 
+    // 解析放在这里，因为上面可能改写 text（补 @收件人、补 @全体成员），
+    // 用改写前的正文解析，files 的 occurrence 区间就跟落盘的 body 对不上。
+    const refs = parseFileRefs(text);
+
     const msg = {
       id: this.nextId(from),
       ts,
@@ -497,7 +747,12 @@ export class Store {
       body: text,
       mentions: parseMentions(text, channelMembers.filter((n) => n !== from)),
       mentionsAll: mentionsAllIn(text),
-      files: parseFileRefs(text),
+      // files 只放已确认的引用，fileCandidates 放解析不确定的。
+      // filesVersion 落盘，读的时候才知道这条消息是按哪版契约写的。
+      // 老消息没有这个字段，读接口会重新解析并标 source: 'derived'。
+      filesVersion: 2,
+      files: refs.files,
+      fileCandidates: refs.candidates,
       replyTo: replyTo || null,
       ck,
     };
@@ -507,6 +762,16 @@ export class Store {
     // appendFileSync 以 O_APPEND 打开，一次 write 一行。Node 单线程 + 同步写，
     // 同进程内天然串行。跨进程靠 _runtime.json 的独占锁挡住，见 lock.mjs。
     fs.appendFileSync(file, JSON.stringify(msg) + '\n', 'utf8');
+
+    // 落盘之后才装饰。顺序不能反：decorateFiles 会往 msg 上挂 filesMeta，
+    // 而 filesMeta 是派生数据，不该进 jsonl —— 先写盘再装饰，磁盘上就只有
+    // filesVersion / files / fileCandidates 三个原始字段。
+    //
+    // 为什么写侧也要装饰：hooks.fire 拿的是这里返回的 msg 对象，
+    // 它要按 filesMeta.source 判断「这份清单能不能信」。不装饰的话
+    // 载荷里的 filesMeta 永远是 null，hooks 里那条
+    // 「source === null 就标 unverified」的判断就永远不生效。
+    decorateFiles(msg);
 
     if (ck) this._remember(ck, msg);
 

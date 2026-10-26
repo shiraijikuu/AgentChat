@@ -21,6 +21,83 @@ import crypto from 'node:crypto';
 const TIMEOUT_MS = 8000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
+// 取清单的退避间隔。国内连 jsdelivr 会间歇性被重置，实测同一条地址前一次
+// ECONNRESET、几秒后再试就是 200，只试一次的话用户只会看到一句 fetch failed。
+// 第一次立刻打，后面两次隔一小会儿。
+const RETRY_DELAYS_MS = [0, 600, 1400];
+
+// jsdelivr 的几个入口走的是不同线路，被重置的时间点常常错开。
+// 主入口连着失败时换一个再试，比在同一台机器上死磕有用。
+const JSDELIVR_MIRRORS = ['fastly.jsdelivr.net', 'gcore.jsdelivr.net'];
+
+// 同一个清单的候选地址。只有 jsdelivr 会展开成多个，别的源原样返回。
+export function candidateUrls(url) {
+  const list = [url];
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return list;
+  }
+  if (!/(^|\.)jsdelivr\.net$/i.test(u.hostname)) return list;
+  for (const host of JSDELIVR_MIRRORS) {
+    if (host === u.hostname) continue;
+    const alt = new URL(url);
+    alt.hostname = host;
+    list.push(alt.toString());
+  }
+  return list;
+}
+
+// 网络层的错误只有 message（fetch failed），真正的原因在 cause.code 里。
+function describeFetchError(e, url, triedHosts = 1) {
+  if (e && e.status) return `清单请求失败 ${e.status}（${url}）`;
+  const cause = e?.cause?.code || e?.cause?.message || '';
+  const detail = [e?.message || String(e), cause].filter(Boolean).join('，');
+  const tail = triedHosts > 1
+    ? `${triedHosts} 个入口各试了 ${RETRY_DELAYS_MS.length} 次`
+    : `试了 ${RETRY_DELAYS_MS.length} 次`;
+  return `连不上更新源 ${url}（${detail}），${tail}`;
+}
+
+// 取清单，网络错误和 5xx 重试，4xx 直接报（地址写错了重试也一样）。
+async function fetchManifestJson(url, doFetch) {
+  let last = null;
+  for (let i = 0; i < RETRY_DELAYS_MS.length; i += 1) {
+    if (RETRY_DELAYS_MS[i]) await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[i]));
+
+    let r;
+    try {
+      r = await doFetch(url, {
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { accept: 'application/json' },
+      });
+    } catch (e) {
+      last = e;
+      continue;
+    }
+
+    if (r.status >= 400 && r.status < 500) {
+      const err = new Error(`清单请求失败 ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    if (!r.ok) {
+      const err = new Error(`服务端 ${r.status}`);
+      err.status = r.status;
+      last = err;
+      continue;
+    }
+    try {
+      return await r.json();
+    } catch (e) {
+      // 拿到的不是合法 JSON，可能是 CDN 抽风，重试一次也可能好
+      last = e;
+    }
+  }
+  throw last;
+}
+
 // 走 jsdelivr 镜像而不是 raw.githubusercontent：后者在国内经常连不上，
 // 而自动检查更新失败是静默的，用户只会觉得「从来没提示过有新版本」。
 // 代价是 jsdelivr 对分支有缓存，发版后最长可能等十二小时才刷到新清单，
@@ -85,18 +162,30 @@ export async function checkForUpdate({ localVersion, localBuild, source, fetchIm
   if (!source?.url) return { kind: 'disabled' };
 
   const doFetch = fetchImpl || globalThis.fetch;
+  // CDN 会缓存，加个时间戳绕过去。清单很小，每次都取新的也无所谓。
+  const u = new URL(source.url);
+  u.searchParams.set('t', String(Date.now()));
+
+  // 网络这一段单独兜。连不上和「清单内容不合法」是两回事，报错要分得开，
+  // 不然界面上只会显示一句 fetch failed，看不出是网络还是清单坏了。
+  let j = null;
+  let lastErr = null;
+  const candidates = candidateUrls(u.toString());
+  for (const target of candidates) {
+    try {
+      j = await fetchManifestJson(target, doFetch);
+      break;
+    } catch (e) {
+      // 4xx 是地址问题，换入口也一样，直接报，别再折腾别的镜像
+      if (e && e.status && e.status < 500) {
+        return { kind: 'error', message: describeFetchError(e, source.url) };
+      }
+      lastErr = e;
+    }
+  }
+  if (!j) return { kind: 'error', message: describeFetchError(lastErr, source.url, candidates.length) };
+
   try {
-    // CDN 会缓存，加个时间戳绕过去。清单很小，每次都取新的也无所谓。
-    const u = new URL(source.url);
-    u.searchParams.set('t', String(Date.now()));
-
-    const r = await doFetch(u.toString(), {
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { accept: 'application/json' },
-    });
-    if (!r.ok) throw new Error(`清单请求失败 ${r.status}`);
-
-    const j = await r.json();
     const remoteVersion = String(j.version || '').trim();
     if (!/^\d+(\.\d+){2}/.test(remoteVersion)) throw new Error('清单里的 version 不合法');
 

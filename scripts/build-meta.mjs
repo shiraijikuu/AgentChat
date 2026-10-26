@@ -7,4 +7,4 @@
 // package.json 读（buildNumber 字段由 extraMetadata 写进去）。
 export const APP_NAME = 'AgentChat';
 export const VERSION = '1.0.0';
-export const BUILD = 22;
+export const BUILD = 24;
